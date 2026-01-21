@@ -1,6 +1,9 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
 using Dalamud.Bindings.ImGui;
 
 namespace ShoutRunner.Ui;
@@ -9,19 +12,24 @@ public sealed class MainWindow : Window
 {
     private readonly Configuration configuration;
     private readonly MacroRunner macroRunner;
+    private readonly IDataManager dataManager;
 
     private MacroActionType newActionType = MacroActionType.Shout;
     private string newPayload = string.Empty;
     private int teleportIndex;
     private int worldIndex;
+    private string teleportFilter = string.Empty;
+    private bool teleportLoaded;
 
-    private static readonly string[] TeleportDestinations =
+    private static readonly string[] TeleportFallback =
     {
         "Ul'dah - Steps of Nald",
         "Limsa Lominsa Lower Decks",
         "New Gridania",
         "Foundation"
     };
+
+    private readonly List<string> teleportDestinations = new();
 
     private static readonly (string World, string Dc)[] NorthAmericaWorlds =
     {
@@ -55,11 +63,12 @@ public sealed class MainWindow : Window
         ("Seraph", "Dynamis"),
     };
 
-    public MainWindow(Configuration configuration, MacroRunner macroRunner)
+    public MainWindow(Configuration configuration, MacroRunner macroRunner, IDataManager dataManager)
         : base("ShoutRunner")
     {
         this.configuration = configuration;
         this.macroRunner = macroRunner;
+        this.dataManager = dataManager;
 
         Size = new Vector2(520, 420);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -72,6 +81,7 @@ public sealed class MainWindow : Window
         DrawInterval();
         ImGui.Separator();
         DrawActions();
+        DrawProgress();
     }
 
     private void DrawStatus()
@@ -204,16 +214,30 @@ public sealed class MainWindow : Window
 
         if (newActionType == MacroActionType.Teleport)
         {
-            if (ImGui.BeginCombo("Aetheryte", TeleportDestinations[teleportIndex]))
+            EnsureTeleportDestinations();
+            var list = teleportDestinations.Count > 0 ? teleportDestinations : TeleportFallback.ToList();
+            if (teleportIndex >= list.Count)
+                teleportIndex = 0;
+
+            ImGui.SetNextItemWidth(240);
+            ImGui.InputText("Filter", ref teleportFilter, 64);
+
+            var preview = list[teleportIndex];
+            if (ImGui.BeginCombo("Aetheryte", preview))
             {
-                for (var i = 0; i < TeleportDestinations.Length; i++)
+                for (var i = 0; i < list.Count; i++)
                 {
-                    if (ImGui.Selectable(TeleportDestinations[i], i == teleportIndex))
+                    var name = list[i];
+                    if (!string.IsNullOrEmpty(teleportFilter) &&
+                        !name.Contains(teleportFilter, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (ImGui.Selectable(name, i == teleportIndex))
                         teleportIndex = i;
                 }
                 ImGui.EndCombo();
             }
-            newPayload = TeleportDestinations[teleportIndex];
+            newPayload = list[teleportIndex];
         }
         else if (newActionType == MacroActionType.WorldVisit)
         {
@@ -247,6 +271,59 @@ public sealed class MainWindow : Window
             configuration.Save();
             newPayload = string.Empty;
         }
-        ImGui.TextDisabled("Shout uses /shout, teleport uses /tele, world uses /visit (auto datacenter if needed).");
+        ImGui.TextDisabled("Shout uses /shout, teleport uses /teleport, world uses /visit (auto datacenter if needed).");
+    }
+
+    private void EnsureTeleportDestinations()
+    {
+        if (teleportLoaded)
+            return;
+
+        teleportLoaded = true;
+        try
+        {
+            var sheet = dataManager.GetExcelSheet<Aetheryte>();
+            if (sheet == null)
+                return;
+
+            var rowType = typeof(Aetheryte);
+            var isAetheryteProperty = rowType.GetProperty("IsAetheryte");
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in sheet)
+            {
+                if (isAetheryteProperty?.PropertyType == typeof(bool))
+                {
+                    if (!(bool)(isAetheryteProperty.GetValue(row) ?? false))
+                        continue;
+                }
+
+                if (row.PlaceName.Value.Name.IsEmpty)
+                    continue;
+
+                var name = row.PlaceName.Value.Name.ToString();
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                if (seen.Add(name))
+                    teleportDestinations.Add(name);
+            }
+
+            teleportDestinations.Sort(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            teleportDestinations.Clear();
+        }
+    }
+
+    private void DrawProgress()
+    {
+        if (!macroRunner.TryGetProgress(out var value, out var label))
+            return;
+
+        ImGui.Separator();
+        ImGui.Text(label);
+        ImGui.ProgressBar(value, new Vector2(-1, 0));
     }
 }

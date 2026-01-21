@@ -18,12 +18,16 @@ public sealed class MacroRunner : IDisposable
     private readonly IChatGui chatGui;
     private readonly ICondition condition;
     private readonly IClientState clientState;
+    private readonly IObjectTable objectTable;
     private readonly IFramework framework;
 
     private readonly Dictionary<string, string> worldToDataCenter;
     private readonly List<string> worldVisitOrder;
     private readonly Queue<QueuedCommand> commandQueue = new();
     private readonly object commandLock = new();
+    private readonly object progressLock = new();
+    private float progressValue;
+    private string progressLabel = string.Empty;
 
     private CancellationTokenSource? executionCts;
     private bool executing;
@@ -34,13 +38,24 @@ public sealed class MacroRunner : IDisposable
 
     public string LastError { get; private set; } = string.Empty;
 
-    public MacroRunner(Configuration config, ICommandManager commandManager, IChatGui chatGui, ICondition condition, IClientState clientState, IFramework framework)
+    public bool TryGetProgress(out float value, out string label)
+    {
+        lock (progressLock)
+        {
+            value = progressValue;
+            label = progressLabel;
+            return !string.IsNullOrEmpty(progressLabel);
+        }
+    }
+
+    public MacroRunner(Configuration config, ICommandManager commandManager, IChatGui chatGui, ICondition condition, IClientState clientState, IObjectTable objectTable, IFramework framework)
     {
         this.config = config;
         this.commandManager = commandManager;
         this.chatGui = chatGui;
         this.condition = condition;
         this.clientState = clientState;
+        this.objectTable = objectTable;
         this.framework = framework;
 
         worldToDataCenter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -149,9 +164,12 @@ public sealed class MacroRunner : IDisposable
         {
             try
             {
-                foreach (var action in config.Actions)
+                var total = config.Actions.Count;
+                for (var i = 0; i < total; i++)
                 {
+                    var action = config.Actions[i];
                     executionCts.Token.ThrowIfCancellationRequested();
+                    SetProgress($"Action {i + 1}/{total}: {action.FriendlyName}", total == 0 ? 0f : (float)i / total);
                     await ExecuteActionAsync(action, executionCts.Token);
                     var delaySeconds = Math.Max(0, config.ClampDelaySeconds());
                     if (delaySeconds > 0)
@@ -168,6 +186,7 @@ public sealed class MacroRunner : IDisposable
                 executing = false;
                 executionCts?.Dispose();
                 executionCts = null;
+                ClearProgress();
 
                 if (Running && config.RepeatEnabled)
                 {
@@ -195,16 +214,15 @@ public sealed class MacroRunner : IDisposable
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.Teleport:
-                await IssueCommandAsync(token, $"/tp {payload}");
+                await IssueCommandAsync(token, $"/teleport {payload}", $"/tele {payload}");
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.WorldVisit:
-                // Prefer Lifestream plugin for world transfer; fall back to /visit.
                 await ExecuteWorldVisitWithFallbackAsync(payload, token);
                 break;
             case MacroActionType.DataCenterVisit:
                 await IssueCommandAsync(token, $"/datacenter {payload}");
-                await WaitForCompletionAsync(action, token);
+                await WaitForDataCenterArrivalAsync(payload, token);
                 break;
         }
     }
@@ -251,6 +269,24 @@ public sealed class MacroRunner : IDisposable
 
         // Ensure we are fully loaded/logged in before continuing.
         await WaitUntilChatReadyAsync(token);
+    }
+
+    private void SetProgress(string label, float value)
+    {
+        lock (progressLock)
+        {
+            progressLabel = label;
+            progressValue = Math.Clamp(value, 0f, 1f);
+        }
+    }
+
+    private void ClearProgress()
+    {
+        lock (progressLock)
+        {
+            progressLabel = string.Empty;
+            progressValue = 0f;
+        }
     }
 
     private string GetDataCenterForWorld(string world)
@@ -443,15 +479,70 @@ public sealed class MacroRunner : IDisposable
         foreach (var candidate in candidates)
         {
             chatGui.Print($"[ShoutRunner] World visit attempt: {candidate}");
-            await IssueCommandAsync(token, $"/lifestream {candidate}", $"/visit {candidate}");
-
-            if (await WaitForWorldArrivalAsync(candidate, token))
+            if (await ExecuteWorldTransferAsync(candidate, token))
                 return;
 
             chatGui.PrintError($"[ShoutRunner] World visit failed: {candidate}. Trying next...");
         }
 
         chatGui.PrintError("[ShoutRunner] All world visit attempts failed; staying on current world.");
+    }
+
+    private async Task<bool> ExecuteWorldTransferAsync(string targetWorld, CancellationToken token)
+    {
+        await WaitUntilChatReadyAsync(token);
+        var state = await GetGameStateAsync(token);
+
+        var currentWorld = state.CurrentWorld;
+        var currentDc = GetDataCenterForWorld(currentWorld);
+        var homeWorld = state.HomeWorld;
+        var homeDc = GetDataCenterForWorld(homeWorld);
+        var targetDc = GetDataCenterForWorld(targetWorld);
+
+        var steps = new List<TransferStep>();
+        var needsDcChange = !string.IsNullOrEmpty(targetDc)
+                            && !string.IsNullOrEmpty(currentDc)
+                            && !string.Equals(currentDc, targetDc, StringComparison.OrdinalIgnoreCase);
+        if (needsDcChange)
+        {
+            if (!string.IsNullOrEmpty(homeDc) && !string.Equals(currentDc, homeDc, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(new TransferStep(TransferStepType.DataCenter, homeDc, $"/datacenter {homeDc}", $"Return to {homeDc}"));
+                if (!string.IsNullOrEmpty(homeWorld))
+                {
+                    steps.Add(new TransferStep(TransferStepType.World, homeWorld, $"/visit {homeWorld}", $"Return to {homeWorld}"));
+                }
+            }
+            else if (!string.IsNullOrEmpty(homeWorld) && !string.Equals(currentWorld, homeWorld, StringComparison.OrdinalIgnoreCase))
+            {
+                steps.Add(new TransferStep(TransferStepType.World, homeWorld, $"/visit {homeWorld}", $"Return to {homeWorld}"));
+            }
+
+            if (!string.IsNullOrEmpty(targetDc) && !string.Equals(homeDc, targetDc, StringComparison.OrdinalIgnoreCase))
+                steps.Add(new TransferStep(TransferStepType.DataCenter, targetDc, $"/datacenter {targetDc}", $"Travel to {targetDc}"));
+        }
+
+        steps.Add(new TransferStep(TransferStepType.World, targetWorld, $"/visit {targetWorld}", $"Visit {targetWorld}"));
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            SetProgress($"Transfer {i + 1}/{steps.Count}: {step.Label}", (float)(i + 1) / steps.Count);
+            await IssueCommandAsync(token, step.Command);
+
+            if (step.Type == TransferStepType.DataCenter)
+            {
+                if (!await WaitForDataCenterArrivalAsync(step.Target, token))
+                    return false;
+            }
+            else
+            {
+                if (!await WaitForWorldArrivalAsync(step.Target, token))
+                    return false;
+            }
+        }
+
+        return true;
     }
 
     private List<string> GetWorldFallbackList(string target)
@@ -507,16 +598,52 @@ public sealed class MacroRunner : IDisposable
         return false;
     }
 
+    private async Task<bool> WaitForDataCenterArrivalAsync(string targetDc, CancellationToken token)
+    {
+        var target = targetDc.Trim();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(150);
+        var seenTransition = false;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            token.ThrowIfCancellationRequested();
+            var state = await GetGameStateAsync(token);
+            if (!state.IsLoggedIn || !state.HasLocalPlayer)
+            {
+                await Task.Delay(500, token);
+                continue;
+            }
+
+            var transitioning = state.BetweenAreas || state.BetweenAreas51;
+            if (transitioning)
+                seenTransition = true;
+
+            if (!transitioning)
+            {
+                var currentDc = GetDataCenterForWorld(state.CurrentWorld);
+                if (!string.IsNullOrEmpty(currentDc) && string.Equals(currentDc, target, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (seenTransition && !string.IsNullOrEmpty(currentDc) && !string.Equals(currentDc, target, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            await Task.Delay(500, token);
+        }
+
+        return false;
+    }
+
     private async Task<GameState> GetGameStateAsync(CancellationToken token)
     {
         var tcs = new TaskCompletionSource<GameState>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var reg = token.Register(() => tcs.TrySetCanceled(token));
 
-        framework.RunOnFrameworkThread(() =>
+        _ = framework.RunOnFrameworkThread(() =>
         {
             try
             {
-                var localPlayer = clientState.LocalPlayer;
+                var localPlayer = objectTable.LocalPlayer;
                 var state = new GameState(
                     clientState.IsLoggedIn,
                     localPlayer != null,
@@ -528,7 +655,8 @@ public sealed class MacroRunner : IDisposable
                     condition[ConditionFlag.OccupiedInEvent],
                     condition[ConditionFlag.Occupied],
                     condition[ConditionFlag.WatchingCutscene],
-                    localPlayer?.CurrentWorld.Value.Name.ToString() ?? string.Empty
+                    localPlayer?.CurrentWorld.Value.Name.ToString() ?? string.Empty,
+                    localPlayer?.HomeWorld.Value.Name.ToString() ?? string.Empty
                 );
                 tcs.TrySetResult(state);
             }
@@ -552,5 +680,14 @@ public sealed class MacroRunner : IDisposable
         bool OccupiedInEvent,
         bool Occupied,
         bool WatchingCutscene,
-        string CurrentWorld);
+        string CurrentWorld,
+        string HomeWorld);
+
+    private sealed record TransferStep(TransferStepType Type, string Target, string Command, string Label);
+
+    private enum TransferStepType
+    {
+        DataCenter,
+        World
+    }
 }

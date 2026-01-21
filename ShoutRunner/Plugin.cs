@@ -27,6 +27,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
+    [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
+    [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
 
     public Plugin()
     {
@@ -34,8 +36,8 @@ public sealed class Plugin : IDalamudPlugin
         configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         configuration.Initialize(PluginInterface);
 
-        macroRunner = new MacroRunner(configuration, CommandManager, ChatGui, Condition, ClientState, Framework);
-        mainWindow = new MainWindow(configuration, macroRunner);
+        macroRunner = new MacroRunner(configuration, CommandManager, ChatGui, Condition, ClientState, ObjectTable, Framework);
+        mainWindow = new MainWindow(configuration, macroRunner, DataManager);
 
         windowSystem.AddWindow(mainWindow);
         PluginInterface.UiBuilder.Draw += DrawUi;
