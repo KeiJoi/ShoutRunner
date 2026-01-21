@@ -237,7 +237,8 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < endAt)
         {
             token.ThrowIfCancellationRequested();
-            var transitioning = condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51];
+            var state = await GetGameStateAsync(token);
+            var transitioning = state.BetweenAreas || state.BetweenAreas51;
             if (transitioning)
                 seenTransition = true;
 
@@ -349,21 +350,22 @@ public sealed class MacroRunner : IDisposable
         {
             token.ThrowIfCancellationRequested();
 
-            if (!clientState.IsLoggedIn || clientState.LocalPlayer == null)
+            var state = await GetGameStateAsync(token);
+            if (!state.IsLoggedIn || !state.HasLocalPlayer)
             {
                 await Task.Delay(500, token);
                 continue;
             }
 
             var blocked =
-                condition[ConditionFlag.BetweenAreas] ||
-                condition[ConditionFlag.BetweenAreas51] ||
-                condition[ConditionFlag.LoggingOut] ||
-                condition[ConditionFlag.OccupiedInCutSceneEvent] ||
-                condition[ConditionFlag.OccupiedInQuestEvent] ||
-                condition[ConditionFlag.OccupiedInEvent] ||
-                condition[ConditionFlag.Occupied] ||
-                condition[ConditionFlag.WatchingCutscene];
+                state.BetweenAreas ||
+                state.BetweenAreas51 ||
+                state.LoggingOut ||
+                state.OccupiedInCutSceneEvent ||
+                state.OccupiedInQuestEvent ||
+                state.OccupiedInEvent ||
+                state.Occupied ||
+                state.WatchingCutscene;
 
             if (!blocked)
                 return;
@@ -478,19 +480,20 @@ public sealed class MacroRunner : IDisposable
         {
             token.ThrowIfCancellationRequested();
 
-            if (!clientState.IsLoggedIn || clientState.LocalPlayer == null)
+            var state = await GetGameStateAsync(token);
+            if (!state.IsLoggedIn || !state.HasLocalPlayer)
             {
                 await Task.Delay(500, token);
                 continue;
             }
 
-            var transitioning = condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51];
+            var transitioning = state.BetweenAreas || state.BetweenAreas51;
             if (transitioning)
                 seenTransition = true;
 
             if (!transitioning)
             {
-                var currentWorld = clientState.LocalPlayer?.CurrentWorld.Value.Name.ToString() ?? string.Empty;
+                var currentWorld = state.CurrentWorld;
                 if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
                     return true;
 
@@ -503,4 +506,51 @@ public sealed class MacroRunner : IDisposable
 
         return false;
     }
+
+    private async Task<GameState> GetGameStateAsync(CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource<GameState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(() => tcs.TrySetCanceled(token));
+
+        framework.RunOnFrameworkThread(() =>
+        {
+            try
+            {
+                var localPlayer = clientState.LocalPlayer;
+                var state = new GameState(
+                    clientState.IsLoggedIn,
+                    localPlayer != null,
+                    condition[ConditionFlag.BetweenAreas],
+                    condition[ConditionFlag.BetweenAreas51],
+                    condition[ConditionFlag.LoggingOut],
+                    condition[ConditionFlag.OccupiedInCutSceneEvent],
+                    condition[ConditionFlag.OccupiedInQuestEvent],
+                    condition[ConditionFlag.OccupiedInEvent],
+                    condition[ConditionFlag.Occupied],
+                    condition[ConditionFlag.WatchingCutscene],
+                    localPlayer?.CurrentWorld.Value.Name.ToString() ?? string.Empty
+                );
+                tcs.TrySetResult(state);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        return await tcs.Task;
+    }
+
+    private sealed record GameState(
+        bool IsLoggedIn,
+        bool HasLocalPlayer,
+        bool BetweenAreas,
+        bool BetweenAreas51,
+        bool LoggingOut,
+        bool OccupiedInCutSceneEvent,
+        bool OccupiedInQuestEvent,
+        bool OccupiedInEvent,
+        bool Occupied,
+        bool WatchingCutscene,
+        string CurrentWorld);
 }
