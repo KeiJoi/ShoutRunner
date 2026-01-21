@@ -191,7 +191,7 @@ public sealed class MacroRunner : IDisposable
         switch (action.Type)
         {
             case MacroActionType.Shout:
-                await IssueECommonsCommandAsync(token, $"/shout {payload}", $"/sh {payload}");
+                await IssueECommonsCommandAsync(token, $"/shout {payload}");
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.Teleport:
@@ -217,7 +217,7 @@ public sealed class MacroRunner : IDisposable
     public void RunSingleShoutTest(string text)
     {
         // Fire a one-off shout test via the same queue as macro actions.
-        _ = IssueECommonsCommandAsync(CancellationToken.None, $"/shout {text}", $"/sh {text}");
+        _ = IssueECommonsCommandAsync(CancellationToken.None, $"/shout {text}");
     }
 
     private async Task WaitForCompletionAsync(MacroAction action, CancellationToken token)
