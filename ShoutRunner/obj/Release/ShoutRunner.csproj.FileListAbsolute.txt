@@ -1,0 +1,17 @@
+C:\shoutrunner\ShoutRunner\bin\Release\ShoutRunner.deps.json
+C:\shoutrunner\ShoutRunner\bin\Release\ShoutRunner.dll
+C:\shoutrunner\ShoutRunner\bin\Release\ECommons.dll
+C:\shoutrunner\ShoutRunner\bin\Release\ImGui.NET.dll
+C:\shoutrunner\ShoutRunner\bin\Release\runtimes\linux-x64\native\libcimgui.so
+C:\shoutrunner\ShoutRunner\bin\Release\runtimes\osx\native\libcimgui.dylib
+C:\shoutrunner\ShoutRunner\bin\Release\runtimes\win-arm64\native\cimgui.dll
+C:\shoutrunner\ShoutRunner\bin\Release\runtimes\win-x64\native\cimgui.dll
+C:\shoutrunner\ShoutRunner\bin\Release\runtimes\win-x86\native\cimgui.dll
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.csproj.AssemblyReference.cache
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.GeneratedMSBuildEditorConfig.editorconfig
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.AssemblyInfoInputs.cache
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.AssemblyInfo.cs
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.csproj.CoreCompileInputs.cache
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.sourcelink.json
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRun.3C9FE59A.Up2Date
+C:\shoutrunner\ShoutRunner\obj\Release\ShoutRunner.dll

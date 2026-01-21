@@ -1,0 +1,6 @@
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.GeneratedMSBuildEditorConfig.editorconfig
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.AssemblyInfoInputs.cache
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.AssemblyInfo.cs
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.csproj.CoreCompileInputs.cache
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.sourcelink.json
+C:\shoutrunner\ShoutRunner\obj\Debug\net10.0-windows\ShoutRunner.csproj.AssemblyReference.cache

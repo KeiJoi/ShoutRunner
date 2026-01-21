@@ -1,0 +1,29 @@
+{
+  "Author": "ShoutRunner",
+  "Name": "ShoutRunner",
+  "Description": "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
+  "RepoUrl": "",
+  "Punchline": "Timed shout/teleport/world/DC macros.",
+  "DalamudApiLevel": 14,
+  "TestingDalamudApiLevel": 14,
+  "ApplicableVersion": "any",
+  "Tags": [
+    "macro",
+    "teleport",
+    "automation",
+    "chat"
+  ],
+  "CategoryTags": [
+    "utility"
+  ],
+  "LoadPriority": 0,
+  "LoadRequiredState": 0,
+  "CanUnloadAsync": true,
+  "TestingPrefixes": [],
+  "AssemblyVersion": "1.0.0.0",
+  "Changelog": "",
+  "ImageUrls": [
+    "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png"
+  ],
+  "IconUrl": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png"
+}
