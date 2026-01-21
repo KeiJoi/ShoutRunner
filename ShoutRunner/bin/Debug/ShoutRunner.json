@@ -20,8 +20,10 @@
   "LoadSync": false,
   "CanUnloadAsync": true,
   "LoadPriority": 0,
-  "ImageUrls": [],
-  "IconUrl": "",
+  "ImageUrls": [
+    "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png"
+  ],
+  "IconUrl": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png",
   "Punchline": "Timed shout/teleport/world/DC macros.",
   "Changelog": "",
   "AcceptsFeedback": true

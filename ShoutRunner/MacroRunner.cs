@@ -22,6 +22,8 @@ public sealed class MacroRunner : IDisposable
 
     private readonly Dictionary<string, string> worldToDataCenter;
     private readonly List<string> worldVisitOrder;
+    private readonly Queue<QueuedCommand> commandQueue = new();
+    private readonly object commandLock = new();
 
     private CancellationTokenSource? executionCts;
     private bool executing;
@@ -129,6 +131,7 @@ public sealed class MacroRunner : IDisposable
 
     public void Tick()
     {
+        ProcessQueuedCommands();
         if (!Running || executing || NextRun == null)
             return;
 
@@ -213,20 +216,8 @@ public sealed class MacroRunner : IDisposable
 
     public void RunSingleShoutTest(string text)
     {
-        // Fire a one-off shout test immediately on the framework thread.
-        framework.RunOnFrameworkThread(() =>
-        {
-            try
-            {
-                chatGui.Print($"[ShoutRunner] Sending test shout: {text}");
-                Chat.ExecuteCommand($"/shout {text}");
-                Chat.ExecuteCommand($"/sh {text}");
-            }
-            catch (Exception ex)
-            {
-                chatGui.PrintError($"[ShoutRunner] Test shout error: {ex.Message}");
-            }
-        });
+        // Fire a one-off shout test via the same queue as macro actions.
+        _ = IssueECommonsCommandAsync(CancellationToken.None, $"/shout {text}", $"/sh {text}");
     }
 
     private async Task WaitForCompletionAsync(MacroAction action, CancellationToken token)
@@ -281,26 +272,7 @@ public sealed class MacroRunner : IDisposable
 
             await WaitUntilChatReadyAsync(token);
             chatGui.Print($"[ShoutRunner] Sending {cmd}");
-
-            var tcs = new TaskCompletionSource();
-            framework.RunOnFrameworkThread(() =>
-            {
-                try
-                {
-                    commandManager.ProcessCommand(cmd);
-                    TryInvokeChatSend(cmd);
-                }
-                catch (Exception ex)
-                {
-                    chatGui.PrintError($"[ShoutRunner] Command error: {ex.Message}");
-                }
-                finally
-                {
-                    tcs.TrySetResult();
-                }
-            });
-
-            await tcs.Task;
+            await EnqueueCommandAsync(cmd, useECommons: false, token);
         }
     }
 
@@ -314,25 +286,7 @@ public sealed class MacroRunner : IDisposable
 
             await WaitUntilChatReadyAsync(token);
             chatGui.Print($"[ShoutRunner] Sending {cmd} via ECommons");
-
-            var tcs = new TaskCompletionSource();
-            framework.RunOnFrameworkThread(() =>
-            {
-                try
-                {
-                    Chat.ExecuteCommand(cmd);
-                }
-                catch (Exception ex)
-                {
-                    chatGui.PrintError($"[ShoutRunner] ECommons command error: {ex.Message}");
-                }
-                finally
-                {
-                    tcs.TrySetResult();
-                }
-            });
-
-            await tcs.Task;
+            await EnqueueCommandAsync(cmd, useECommons: true, token);
         }
     }
 
@@ -415,6 +369,65 @@ public sealed class MacroRunner : IDisposable
                 return;
 
             await Task.Delay(200, token);
+        }
+    }
+
+    private async Task EnqueueCommandAsync(string command, bool useECommons, CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(() => tcs.TrySetCanceled(token));
+
+        lock (commandLock)
+        {
+            commandQueue.Enqueue(new QueuedCommand(command, useECommons, tcs));
+        }
+
+        await tcs.Task;
+    }
+
+    private void ProcessQueuedCommands()
+    {
+        QueuedCommand? queued = null;
+        lock (commandLock)
+        {
+            if (commandQueue.Count > 0)
+                queued = commandQueue.Dequeue();
+        }
+
+        if (queued == null)
+            return;
+
+        try
+        {
+            if (queued.UseECommons)
+            {
+                Chat.ExecuteCommand(queued.Command);
+            }
+            else
+            {
+                commandManager.ProcessCommand(queued.Command);
+                TryInvokeChatSend(queued.Command);
+            }
+            queued.Completion.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            chatGui.PrintError($"[ShoutRunner] Command error: {ex.Message}");
+            queued.Completion.TrySetException(ex);
+        }
+    }
+
+    private sealed class QueuedCommand
+    {
+        public string Command { get; }
+        public bool UseECommons { get; }
+        public TaskCompletionSource Completion { get; }
+
+        public QueuedCommand(string command, bool useECommons, TaskCompletionSource completion)
+        {
+            Command = command;
+            UseECommons = useECommons;
+            Completion = completion;
         }
     }
 

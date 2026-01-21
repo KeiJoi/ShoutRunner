@@ -20,7 +20,7 @@
   "LoadRequiredState": 0,
   "CanUnloadAsync": true,
   "TestingPrefixes": [],
-  "AssemblyVersion": "1.0.0.0",
+  "AssemblyVersion": "1.0.0.1",
   "Changelog": "",
   "ImageUrls": [
     "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png"
