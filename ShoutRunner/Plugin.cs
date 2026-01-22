@@ -19,6 +19,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windowSystem = new("ShoutRunner");
     private readonly Configuration configuration;
     private readonly MacroRunner macroRunner;
+    private readonly LifestreamIpc lifestreamIpc;
     private readonly MainWindow mainWindow;
 
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
@@ -36,7 +37,8 @@ public sealed class Plugin : IDalamudPlugin
         configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         configuration.Initialize(PluginInterface);
 
-        macroRunner = new MacroRunner(configuration, CommandManager, ChatGui, Condition, ClientState, ObjectTable, Framework);
+        lifestreamIpc = new LifestreamIpc(PluginInterface);
+        macroRunner = new MacroRunner(configuration, CommandManager, ChatGui, Condition, ClientState, ObjectTable, DataManager, lifestreamIpc, Framework);
         mainWindow = new MainWindow(configuration, macroRunner, DataManager);
 
         windowSystem.AddWindow(mainWindow);

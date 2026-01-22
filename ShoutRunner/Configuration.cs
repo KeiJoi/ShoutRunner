@@ -12,6 +12,8 @@ public sealed class Configuration : IPluginConfiguration
 
     public List<MacroAction> Actions { get; set; } = new();
 
+    public List<MacroPreset> Presets { get; set; } = new();
+
     public bool RepeatEnabled { get; set; } = true;
 
     public int IntervalHours { get; set; } = 0;

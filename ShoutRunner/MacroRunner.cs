@@ -4,10 +4,15 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using Dalamud.Game;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using ECommons.Automation;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
+using Lumina.Excel.Sheets;
 
 namespace ShoutRunner;
 
@@ -19,6 +24,8 @@ public sealed class MacroRunner : IDisposable
     private readonly ICondition condition;
     private readonly IClientState clientState;
     private readonly IObjectTable objectTable;
+    private readonly IDataManager dataManager;
+    private readonly LifestreamIpc lifestreamIpc;
     private readonly IFramework framework;
 
     private readonly Dictionary<string, string> worldToDataCenter;
@@ -28,6 +35,9 @@ public sealed class MacroRunner : IDisposable
     private readonly object progressLock = new();
     private float progressValue;
     private string progressLabel = string.Empty;
+    private readonly Dictionary<uint, string> aetheryteNames = new();
+    private readonly Dictionary<uint, string> territoryNames = new();
+    private bool teleportDataLoaded;
 
     private CancellationTokenSource? executionCts;
     private bool executing;
@@ -48,7 +58,7 @@ public sealed class MacroRunner : IDisposable
         }
     }
 
-    public MacroRunner(Configuration config, ICommandManager commandManager, IChatGui chatGui, ICondition condition, IClientState clientState, IObjectTable objectTable, IFramework framework)
+    public MacroRunner(Configuration config, ICommandManager commandManager, IChatGui chatGui, ICondition condition, IClientState clientState, IObjectTable objectTable, IDataManager dataManager, LifestreamIpc lifestreamIpc, IFramework framework)
     {
         this.config = config;
         this.commandManager = commandManager;
@@ -56,6 +66,8 @@ public sealed class MacroRunner : IDisposable
         this.condition = condition;
         this.clientState = clientState;
         this.objectTable = objectTable;
+        this.dataManager = dataManager;
+        this.lifestreamIpc = lifestreamIpc;
         this.framework = framework;
 
         worldToDataCenter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -214,15 +226,14 @@ public sealed class MacroRunner : IDisposable
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.Teleport:
-                await IssueCommandAsync(token, BuildTeleportCommand(payload));
-                await WaitForCompletionAsync(action, token);
+                if (await TryTeleportAsync(payload, token))
+                    await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.WorldVisit:
                 await ExecuteWorldVisitWithFallbackAsync(payload, token);
                 break;
             case MacroActionType.DataCenterVisit:
-                await IssueCommandAsync(token, BuildDataCenterVisitCommand(payload));
-                await WaitForDataCenterArrivalAsync(payload, token);
+                await ExecuteDataCenterVisitAsync(payload, token);
                 break;
         }
     }
@@ -410,6 +421,29 @@ public sealed class MacroRunner : IDisposable
         }
     }
 
+    private async Task<bool> WaitForLifestreamReadyAsync(CancellationToken token)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            token.ThrowIfCancellationRequested();
+
+            if (!lifestreamIpc.TryIsBusy(out var busy))
+            {
+                chatGui.PrintError("[ShoutRunner] Lifestream IPC not available. Install Lifestream for world/DC travel.");
+                return false;
+            }
+
+            if (!busy)
+                return true;
+
+            await Task.Delay(500, token);
+        }
+
+        chatGui.PrintError("[ShoutRunner] Lifestream is busy; cannot start transfer.");
+        return false;
+    }
+
     private async Task EnqueueCommandAsync(string command, bool useECommons, CancellationToken token)
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -478,7 +512,7 @@ public sealed class MacroRunner : IDisposable
         var candidates = GetWorldFallbackList(target);
         foreach (var candidate in candidates)
         {
-            chatGui.Print($"[ShoutRunner] World visit attempt: {candidate}");
+            chatGui.Print($"[ShoutRunner] World visit attempt via Lifestream: {candidate}");
             if (await ExecuteWorldTransferAsync(candidate, token))
                 return;
 
@@ -488,61 +522,38 @@ public sealed class MacroRunner : IDisposable
         chatGui.PrintError("[ShoutRunner] All world visit attempts failed; staying on current world.");
     }
 
+    private async Task ExecuteDataCenterVisitAsync(string dataCenter, CancellationToken token)
+    {
+        var target = dataCenter.Trim();
+        if (string.IsNullOrEmpty(target))
+            return;
+
+        var world = GetWorldForDataCenter(target);
+        if (string.IsNullOrEmpty(world))
+        {
+            chatGui.PrintError($"[ShoutRunner] Unknown data center: {target}");
+            return;
+        }
+
+        chatGui.Print($"[ShoutRunner] Data center visit via Lifestream: {target} (using {world})");
+        await ExecuteWorldTransferAsync(world, token);
+    }
+
     private async Task<bool> ExecuteWorldTransferAsync(string targetWorld, CancellationToken token)
     {
         await WaitUntilChatReadyAsync(token);
-        var state = await GetGameStateAsync(token);
+        if (!await WaitForLifestreamReadyAsync(token))
+            return false;
 
-        var currentWorld = state.CurrentWorld;
-        var currentDc = GetDataCenterForWorld(currentWorld);
-        var homeWorld = state.HomeWorld;
-        var homeDc = GetDataCenterForWorld(homeWorld);
-        var targetDc = GetDataCenterForWorld(targetWorld);
-
-        var steps = new List<TransferStep>();
-        var needsDcChange = !string.IsNullOrEmpty(targetDc)
-                            && !string.IsNullOrEmpty(currentDc)
-                            && !string.Equals(currentDc, targetDc, StringComparison.OrdinalIgnoreCase);
-        if (needsDcChange)
+        chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld}");
+        if (!lifestreamIpc.TryChangeWorld(targetWorld))
         {
-            if (!string.IsNullOrEmpty(homeDc) && !string.Equals(currentDc, homeDc, StringComparison.OrdinalIgnoreCase))
-            {
-                steps.Add(new TransferStep(TransferStepType.DataCenter, homeDc, BuildDataCenterVisitCommand(homeDc), $"Return to {homeDc}"));
-                if (!string.IsNullOrEmpty(homeWorld))
-                {
-                    steps.Add(new TransferStep(TransferStepType.World, homeWorld, BuildWorldVisitCommand(homeWorld), $"Return to {homeWorld}"));
-                }
-            }
-            else if (!string.IsNullOrEmpty(homeWorld) && !string.Equals(currentWorld, homeWorld, StringComparison.OrdinalIgnoreCase))
-            {
-                steps.Add(new TransferStep(TransferStepType.World, homeWorld, BuildWorldVisitCommand(homeWorld), $"Return to {homeWorld}"));
-            }
-
-            if (!string.IsNullOrEmpty(targetDc) && !string.Equals(homeDc, targetDc, StringComparison.OrdinalIgnoreCase))
-                steps.Add(new TransferStep(TransferStepType.DataCenter, targetDc, BuildDataCenterVisitCommand(targetDc), $"Travel to {targetDc}"));
+            chatGui.PrintError($"[ShoutRunner] Lifestream rejected transfer to {targetWorld}.");
+            return false;
         }
 
-        steps.Add(new TransferStep(TransferStepType.World, targetWorld, BuildWorldVisitCommand(targetWorld), $"Visit {targetWorld}"));
-
-        for (var i = 0; i < steps.Count; i++)
-        {
-            var step = steps[i];
-            SetProgress($"Transfer {i + 1}/{steps.Count}: {step.Label}", (float)(i + 1) / steps.Count);
-            await IssueCommandAsync(token, step.Command);
-
-            if (step.Type == TransferStepType.DataCenter)
-            {
-                if (!await WaitForDataCenterArrivalAsync(step.Target, token))
-                    return false;
-            }
-            else
-            {
-                if (!await WaitForWorldArrivalAsync(step.Target, token))
-                    return false;
-            }
-        }
-
-        return true;
+        SetProgress($"Travel to {targetWorld}", 0.5f);
+        return await WaitForWorldArrivalAsync(targetWorld, token);
     }
 
     private List<string> GetWorldFallbackList(string target)
@@ -559,6 +570,20 @@ public sealed class MacroRunner : IDisposable
         }
 
         return ordered;
+    }
+
+    private string GetWorldForDataCenter(string dataCenter)
+    {
+        if (string.IsNullOrWhiteSpace(dataCenter))
+            return string.Empty;
+
+        foreach (var world in worldVisitOrder)
+        {
+            if (string.Equals(GetDataCenterForWorld(world), dataCenter, StringComparison.OrdinalIgnoreCase))
+                return world;
+        }
+
+        return string.Empty;
     }
 
     private async Task<bool> WaitForWorldArrivalAsync(string targetWorld, CancellationToken token)
@@ -634,6 +659,180 @@ public sealed class MacroRunner : IDisposable
         return false;
     }
 
+    private async Task<bool> TryTeleportAsync(string destination, CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(() => tcs.TrySetCanceled(token));
+
+        _ = framework.RunOnFrameworkThread(() =>
+        {
+            try
+            {
+                EnsureTeleportDataLoaded();
+                if (!TryFindTeleportInfo(destination, out var info, out var name))
+                {
+                    chatGui.PrintError($"[ShoutRunner] No attuned aetheryte found for \"{destination}\".");
+                    tcs.TrySetResult(false);
+                    return;
+                }
+
+                unsafe
+                {
+                    var localPlayer = Control.GetLocalPlayer();
+                    if (localPlayer == null)
+                    {
+                        chatGui.PrintError("[ShoutRunner] Teleport failed: player not available.");
+                        tcs.TrySetResult(false);
+                        return;
+                    }
+
+                    var status = ActionManager.Instance()->GetActionStatus(ActionType.Action, 5);
+                    if (status != 0)
+                    {
+                        chatGui.PrintError($"[ShoutRunner] Teleport not ready (status {status}).");
+                        tcs.TrySetResult(false);
+                        return;
+                    }
+
+                    var success = Telepo.Instance()->Teleport(info.AetheryteId, info.SubIndex);
+                    if (success)
+                        chatGui.Print($"[ShoutRunner] Teleporting to {name}.");
+                    else
+                        chatGui.PrintError($"[ShoutRunner] Teleport failed for {name}.");
+
+                    tcs.TrySetResult(success);
+                }
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        return await tcs.Task;
+    }
+
+    private void EnsureTeleportDataLoaded()
+    {
+        if (teleportDataLoaded)
+            return;
+
+        teleportDataLoaded = true;
+        try
+        {
+            var sheet = dataManager.GetExcelSheet<Aetheryte>(clientState.ClientLanguage);
+            if (sheet == null)
+                return;
+
+            foreach (var row in sheet)
+            {
+                var placeName = row.PlaceName.ValueNullable?.Name.ToString();
+                if (!string.IsNullOrWhiteSpace(placeName))
+                    aetheryteNames[row.RowId] = placeName;
+
+                if (row.IsAetheryte)
+                {
+                    var territoryName = row.Territory.ValueNullable?.PlaceName.ValueNullable?.Name.ToString();
+                    if (!string.IsNullOrWhiteSpace(territoryName))
+                        territoryNames[row.RowId] = territoryName;
+                }
+            }
+        }
+        catch
+        {
+            aetheryteNames.Clear();
+            territoryNames.Clear();
+        }
+    }
+
+    private unsafe bool TryFindTeleportInfo(string destination, out TeleportInfo info, out string name)
+    {
+        info = default;
+        name = destination;
+
+        var dest = destination.Trim();
+        if (string.IsNullOrEmpty(dest))
+            return false;
+
+        var tp = Telepo.Instance();
+        if (tp == null || tp->UpdateAetheryteList() == null)
+            return false;
+
+        var count = tp->TeleportList.LongCount;
+        if (count <= 0)
+            return false;
+
+        for (long i = 0; i < count; i++)
+        {
+            var entry = tp->TeleportList[i];
+            if (aetheryteNames.TryGetValue(entry.AetheryteId, out var placeName)
+                && string.Equals(placeName, dest, StringComparison.OrdinalIgnoreCase))
+            {
+                info = entry;
+                name = placeName;
+                return true;
+            }
+        }
+
+        for (long i = 0; i < count; i++)
+        {
+            var entry = tp->TeleportList[i];
+            if (territoryNames.TryGetValue(entry.AetheryteId, out var territoryName)
+                && string.Equals(territoryName, dest, StringComparison.OrdinalIgnoreCase))
+            {
+                info = entry;
+                name = aetheryteNames.TryGetValue(entry.AetheryteId, out var placeName) ? placeName : territoryName;
+                return true;
+            }
+        }
+
+        TeleportInfo? match = null;
+        string? matchName = null;
+        var matches = 0;
+
+        for (long i = 0; i < count; i++)
+        {
+            var entry = tp->TeleportList[i];
+            var placeName = aetheryteNames.TryGetValue(entry.AetheryteId, out var p) ? p : string.Empty;
+            var territoryName = territoryNames.TryGetValue(entry.AetheryteId, out var t) ? t : string.Empty;
+
+            if (!string.IsNullOrEmpty(placeName) &&
+                (placeName.Contains(dest, StringComparison.OrdinalIgnoreCase) || dest.Contains(placeName, StringComparison.OrdinalIgnoreCase)))
+            {
+                matches++;
+                if (matches == 1)
+                {
+                    match = entry;
+                    matchName = placeName;
+                }
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(territoryName) &&
+                (territoryName.Contains(dest, StringComparison.OrdinalIgnoreCase) || dest.Contains(territoryName, StringComparison.OrdinalIgnoreCase)))
+            {
+                matches++;
+                if (matches == 1)
+                {
+                    match = entry;
+                    matchName = !string.IsNullOrEmpty(placeName) ? placeName : territoryName;
+                }
+            }
+        }
+
+        if (matches == 1 && match.HasValue && matchName != null)
+        {
+            info = match.Value;
+            name = matchName;
+            return true;
+        }
+
+        if (matches > 1)
+            chatGui.PrintError($"[ShoutRunner] Teleport destination \"{destination}\" is ambiguous.");
+
+        return false;
+    }
+
     private async Task<GameState> GetGameStateAsync(CancellationToken token)
     {
         var tcs = new TaskCompletionSource<GameState>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -683,41 +882,4 @@ public sealed class MacroRunner : IDisposable
         string CurrentWorld,
         string HomeWorld);
 
-    private sealed record TransferStep(TransferStepType Type, string Target, string Command, string Label);
-
-    private enum TransferStepType
-    {
-        DataCenter,
-        World
-    }
-
-    private static string BuildTeleportCommand(string destination)
-    {
-        return BuildCommand("/teleport", destination);
-    }
-
-    private static string BuildWorldVisitCommand(string world)
-    {
-        return BuildCommand("/worldvisit", world);
-    }
-
-    private static string BuildDataCenterVisitCommand(string dataCenter)
-    {
-        return BuildCommand("/dcvisit", dataCenter);
-    }
-
-    private static string BuildCommand(string command, string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload))
-            return command;
-
-        var trimmed = payload.Trim();
-        if (trimmed.Contains('"', StringComparison.Ordinal))
-            trimmed = trimmed.Replace("\"", "'", StringComparison.Ordinal);
-
-        if (trimmed.Any(char.IsWhiteSpace))
-            trimmed = $"\"{trimmed}\"";
-
-        return $"{command} {trimmed}";
-    }
 }

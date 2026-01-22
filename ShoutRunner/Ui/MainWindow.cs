@@ -20,11 +20,19 @@ public sealed class MainWindow : Window
     private int worldIndex;
     private string teleportFilter = string.Empty;
     private bool teleportLoaded;
+    private int editIndex = -1;
+    private MacroActionType editActionType = MacroActionType.Shout;
+    private string editPayload = string.Empty;
+    private int editTeleportIndex;
+    private int editWorldIndex;
+    private string editTeleportFilter = string.Empty;
+    private string presetName = string.Empty;
+    private int presetIndex;
 
     private static readonly string[] TeleportFallback =
     {
         "Ul'dah - Steps of Nald",
-        "Limsa Lominsa Lower Decks",
+        "Limsa Lominsa",
         "New Gridania",
         "Foundation"
     };
@@ -81,6 +89,8 @@ public sealed class MainWindow : Window
         DrawInterval();
         ImGui.Separator();
         DrawActions();
+        ImGui.Separator();
+        DrawPresets();
         DrawProgress();
     }
 
@@ -166,11 +176,12 @@ public sealed class MainWindow : Window
     private void DrawActions()
     {
         ImGui.Text("Macro actions (executed in order)");
-        if (ImGui.BeginTable("##actions", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame))
+        if (ImGui.BeginTable("##actions", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableSetupColumn("Details");
-            ImGui.TableSetupColumn("##remove", ImGuiTableColumnFlags.WidthFixed, 70);
+            ImGui.TableSetupColumn("Order", ImGuiTableColumnFlags.WidthFixed, 90);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
             ImGui.TableHeadersRow();
 
             for (var i = 0; i < configuration.Actions.Count; i++)
@@ -182,10 +193,37 @@ public sealed class MainWindow : Window
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextWrapped(string.IsNullOrEmpty(action.Payload) ? "(not configured)" : action.DisplayDetail);
                 ImGui.TableSetColumnIndex(2);
+                ImGui.BeginDisabled(i == 0);
+                if (ImGui.Button($"Up##{i}"))
+                {
+                    MoveAction(i, i - 1);
+                    ImGui.EndTable();
+                    return;
+                }
+                ImGui.EndDisabled();
+                ImGui.SameLine();
+                ImGui.BeginDisabled(i == configuration.Actions.Count - 1);
+                if (ImGui.Button($"Down##{i}"))
+                {
+                    MoveAction(i, i + 1);
+                    ImGui.EndTable();
+                    return;
+                }
+                ImGui.EndDisabled();
+                ImGui.TableSetColumnIndex(3);
+                if (ImGui.Button($"Edit##{i}"))
+                {
+                    BeginEditAction(i);
+                }
+                ImGui.SameLine();
                 if (ImGui.Button($"Remove##{i}"))
                 {
                     configuration.Actions.RemoveAt(i);
                     configuration.Save();
+                    if (editIndex == i)
+                        editIndex = -1;
+                    else if (editIndex > i)
+                        editIndex--;
                     ImGui.EndTable();
                     return;
                 }
@@ -196,69 +234,7 @@ public sealed class MainWindow : Window
 
         ImGui.Separator();
         ImGui.Text("Add action");
-
-        if (ImGui.BeginCombo("Type", newActionType.ToString()))
-        {
-            foreach (MacroActionType type in Enum.GetValues(typeof(MacroActionType)))
-            {
-                if (type == MacroActionType.DataCenterVisit)
-                    continue; // Data center handled automatically during world visits.
-
-                if (ImGui.Selectable(type.ToString(), type == newActionType))
-                {
-                    newActionType = type;
-                }
-            }
-            ImGui.EndCombo();
-        }
-
-        if (newActionType == MacroActionType.Teleport)
-        {
-            EnsureTeleportDestinations();
-            var list = teleportDestinations.Count > 0 ? teleportDestinations : TeleportFallback.ToList();
-            if (teleportIndex >= list.Count)
-                teleportIndex = 0;
-
-            ImGui.SetNextItemWidth(240);
-            ImGui.InputText("Filter", ref teleportFilter, 64);
-
-            var preview = list[teleportIndex];
-            if (ImGui.BeginCombo("Aetheryte", preview))
-            {
-                for (var i = 0; i < list.Count; i++)
-                {
-                    var name = list[i];
-                    if (!string.IsNullOrEmpty(teleportFilter) &&
-                        !name.Contains(teleportFilter, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    if (ImGui.Selectable(name, i == teleportIndex))
-                        teleportIndex = i;
-                }
-                ImGui.EndCombo();
-            }
-            newPayload = list[teleportIndex];
-        }
-        else if (newActionType == MacroActionType.WorldVisit)
-        {
-            var currentLabel = $"{NorthAmericaWorlds[worldIndex].World} ({NorthAmericaWorlds[worldIndex].Dc})";
-            if (ImGui.BeginCombo("World", currentLabel))
-            {
-                for (var i = 0; i < NorthAmericaWorlds.Length; i++)
-                {
-                    var label = $"{NorthAmericaWorlds[i].World} ({NorthAmericaWorlds[i].Dc})";
-                    if (ImGui.Selectable(label, i == worldIndex))
-                        worldIndex = i;
-                }
-                ImGui.EndCombo();
-            }
-            newPayload = NorthAmericaWorlds[worldIndex].World;
-        }
-        else
-        {
-            ImGui.SetNextItemWidth(320);
-            ImGui.InputText("Message", ref newPayload, 256);
-        }
+        DrawActionEditor("Type", ref newActionType, ref newPayload, ref teleportIndex, ref worldIndex, ref teleportFilter, allowCustomWorld: false);
         ImGui.SameLine();
         if (ImGui.Button("Add"))
         {
@@ -271,7 +247,281 @@ public sealed class MainWindow : Window
             configuration.Save();
             newPayload = string.Empty;
         }
-        ImGui.TextDisabled("Shout uses /shout, teleport uses /teleport, world uses /worldvisit (auto data center if needed).");
+        ImGui.TextDisabled("Shout uses /shout, teleport uses native teleport, world/DC uses Lifestream if installed.");
+
+        if (editIndex >= 0 && editIndex < configuration.Actions.Count)
+        {
+            ImGui.Separator();
+            ImGui.Text($"Edit action #{editIndex + 1}");
+            DrawActionEditor("Type##edit", ref editActionType, ref editPayload, ref editTeleportIndex, ref editWorldIndex, ref editTeleportFilter, allowCustomWorld: true);
+            if (ImGui.Button("Save changes"))
+            {
+                var updated = new MacroAction
+                {
+                    Type = editActionType,
+                    Payload = editPayload
+                };
+                configuration.Actions[editIndex] = updated;
+                configuration.Save();
+                editIndex = -1;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+                editIndex = -1;
+        }
+    }
+
+    private void DrawActionEditor(string typeLabel, ref MacroActionType actionType, ref string payload, ref int teleportSelection, ref int worldSelection, ref string filter, bool allowCustomWorld)
+    {
+        if (ImGui.BeginCombo(typeLabel, actionType.ToString()))
+        {
+            foreach (MacroActionType type in Enum.GetValues(typeof(MacroActionType)))
+            {
+                if (type == MacroActionType.DataCenterVisit)
+                    continue; // Data center handled automatically during world visits.
+
+                if (ImGui.Selectable(type.ToString(), type == actionType))
+                {
+                    actionType = type;
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        if (actionType == MacroActionType.Teleport)
+        {
+            EnsureTeleportDestinations();
+            var list = GetTeleportListWithPayload(payload);
+            teleportSelection = ClampSelection(teleportSelection, list.Count);
+            var payloadValue = payload;
+            var matchIndex = -1;
+            for (var i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(list[i], payloadValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchIndex = i;
+                    break;
+                }
+            }
+            if (matchIndex >= 0)
+                teleportSelection = matchIndex;
+
+            ImGui.SetNextItemWidth(240);
+            ImGui.InputText("Filter", ref filter, 64);
+
+            var preview = list[teleportSelection];
+            if (ImGui.BeginCombo("Aetheryte", preview))
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    var name = list[i];
+                    if (!string.IsNullOrEmpty(filter) &&
+                        !name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (ImGui.Selectable(name, i == teleportSelection))
+                        teleportSelection = i;
+                }
+                ImGui.EndCombo();
+            }
+            payload = list[teleportSelection];
+        }
+        else if (actionType == MacroActionType.WorldVisit)
+        {
+            var payloadValue = payload;
+            var matchIndex = -1;
+            for (var i = 0; i < NorthAmericaWorlds.Length; i++)
+            {
+                if (string.Equals(NorthAmericaWorlds[i].World, payloadValue, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchIndex = i;
+                    break;
+                }
+            }
+            if (matchIndex >= 0)
+                worldSelection = matchIndex;
+
+            worldSelection = ClampSelection(worldSelection, NorthAmericaWorlds.Length);
+            var currentLabel = $"{NorthAmericaWorlds[worldSelection].World} ({NorthAmericaWorlds[worldSelection].Dc})";
+            if (ImGui.BeginCombo("World", currentLabel))
+            {
+                for (var i = 0; i < NorthAmericaWorlds.Length; i++)
+                {
+                    var label = $"{NorthAmericaWorlds[i].World} ({NorthAmericaWorlds[i].Dc})";
+                    if (ImGui.Selectable(label, i == worldSelection))
+                        worldSelection = i;
+                }
+                ImGui.EndCombo();
+            }
+            payload = NorthAmericaWorlds[worldSelection].World;
+
+            if (allowCustomWorld)
+            {
+                ImGui.SetNextItemWidth(240);
+                ImGui.InputText("Custom world", ref payload, 64);
+            }
+        }
+        else
+        {
+            ImGui.SetNextItemWidth(320);
+            ImGui.InputText("Message", ref payload, 256);
+        }
+    }
+
+    private static int ClampSelection(int index, int count)
+    {
+        if (count <= 0)
+            return 0;
+        if (index < 0 || index >= count)
+            return 0;
+        return index;
+    }
+
+    private List<string> GetTeleportListWithPayload(string payload)
+    {
+        var list = teleportDestinations.Count > 0 ? teleportDestinations : TeleportFallback.ToList();
+        if (!string.IsNullOrWhiteSpace(payload) &&
+            !list.Any(name => string.Equals(name, payload, StringComparison.OrdinalIgnoreCase)))
+        {
+            list = new List<string>(list);
+            list.Insert(0, payload.Trim());
+        }
+
+        return list;
+    }
+
+    private void BeginEditAction(int index)
+    {
+        if (index < 0 || index >= configuration.Actions.Count)
+            return;
+
+        var action = configuration.Actions[index];
+        editIndex = index;
+        editActionType = action.Type;
+        editPayload = action.Payload;
+        editTeleportIndex = 0;
+        editWorldIndex = 0;
+        editTeleportFilter = string.Empty;
+
+        if (editActionType == MacroActionType.Teleport)
+        {
+            EnsureTeleportDestinations();
+            var list = GetTeleportListWithPayload(editPayload);
+            var matchIndex = list.FindIndex(name => string.Equals(name, editPayload, StringComparison.OrdinalIgnoreCase));
+            if (matchIndex >= 0)
+                editTeleportIndex = matchIndex;
+        }
+        else if (editActionType == MacroActionType.WorldVisit)
+        {
+            var matchIndex = Array.FindIndex(NorthAmericaWorlds, w => string.Equals(w.World, editPayload, StringComparison.OrdinalIgnoreCase));
+            if (matchIndex >= 0)
+                editWorldIndex = matchIndex;
+        }
+    }
+
+    private void MoveAction(int from, int to)
+    {
+        if (from < 0 || from >= configuration.Actions.Count || to < 0 || to >= configuration.Actions.Count)
+            return;
+
+        var item = configuration.Actions[from];
+        configuration.Actions.RemoveAt(from);
+        configuration.Actions.Insert(to, item);
+        configuration.Save();
+
+        if (editIndex == from)
+            editIndex = to;
+        else if (editIndex >= 0)
+        {
+            if (from < editIndex && to >= editIndex)
+                editIndex--;
+            else if (from > editIndex && to <= editIndex)
+                editIndex++;
+        }
+    }
+
+    private void DrawPresets()
+    {
+        ImGui.Text("Macros");
+        ImGui.SetNextItemWidth(220);
+        ImGui.InputText("Preset name", ref presetName, 64);
+
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(presetName));
+        if (ImGui.Button("Save current"))
+        {
+            SavePreset(presetName);
+        }
+        ImGui.EndDisabled();
+
+        if (configuration.Presets.Count == 0)
+        {
+            ImGui.TextDisabled("No saved macros yet.");
+            return;
+        }
+
+        presetIndex = ClampSelection(presetIndex, configuration.Presets.Count);
+        var currentName = configuration.Presets[presetIndex].Name;
+        if (ImGui.BeginCombo("Saved macros", currentName))
+        {
+            for (var i = 0; i < configuration.Presets.Count; i++)
+            {
+                var name = configuration.Presets[i].Name;
+                if (ImGui.Selectable(name, i == presetIndex))
+                {
+                    presetIndex = i;
+                    presetName = name;
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        if (ImGui.Button("Load"))
+        {
+            LoadPreset(configuration.Presets[presetIndex]);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Delete"))
+        {
+            configuration.Presets.RemoveAt(presetIndex);
+            configuration.Save();
+            presetIndex = 0;
+        }
+    }
+
+    private void SavePreset(string name)
+    {
+        var trimmed = name.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return;
+
+        var existing = configuration.Presets.FirstOrDefault(p => string.Equals(p.Name, trimmed, StringComparison.OrdinalIgnoreCase));
+        var actions = configuration.Actions.Select(action => action.Clone()).ToList();
+
+        if (existing == null)
+        {
+            configuration.Presets.Add(new MacroPreset
+            {
+                Name = trimmed,
+                Actions = actions
+            });
+            presetIndex = configuration.Presets.Count - 1;
+        }
+        else
+        {
+            existing.Name = trimmed;
+            existing.Actions = actions;
+            presetIndex = configuration.Presets.IndexOf(existing);
+        }
+
+        configuration.Save();
+    }
+
+    private void LoadPreset(MacroPreset preset)
+    {
+        macroRunner.Stop();
+        configuration.Actions = preset.Actions.Select(action => action.Clone()).ToList();
+        configuration.Save();
+        editIndex = -1;
     }
 
     private void EnsureTeleportDestinations()
