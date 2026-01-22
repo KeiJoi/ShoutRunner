@@ -214,14 +214,14 @@ public sealed class MacroRunner : IDisposable
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.Teleport:
-                await IssueCommandAsync(token, $"/teleport {payload}", $"/tele {payload}");
+                await IssueCommandAsync(token, BuildTeleportCommand(payload));
                 await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.WorldVisit:
                 await ExecuteWorldVisitWithFallbackAsync(payload, token);
                 break;
             case MacroActionType.DataCenterVisit:
-                await IssueCommandAsync(token, $"/datacenter {payload}");
+                await IssueCommandAsync(token, BuildDataCenterVisitCommand(payload));
                 await WaitForDataCenterArrivalAsync(payload, token);
                 break;
         }
@@ -507,22 +507,22 @@ public sealed class MacroRunner : IDisposable
         {
             if (!string.IsNullOrEmpty(homeDc) && !string.Equals(currentDc, homeDc, StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(new TransferStep(TransferStepType.DataCenter, homeDc, $"/datacenter {homeDc}", $"Return to {homeDc}"));
+                steps.Add(new TransferStep(TransferStepType.DataCenter, homeDc, BuildDataCenterVisitCommand(homeDc), $"Return to {homeDc}"));
                 if (!string.IsNullOrEmpty(homeWorld))
                 {
-                    steps.Add(new TransferStep(TransferStepType.World, homeWorld, $"/visit {homeWorld}", $"Return to {homeWorld}"));
+                    steps.Add(new TransferStep(TransferStepType.World, homeWorld, BuildWorldVisitCommand(homeWorld), $"Return to {homeWorld}"));
                 }
             }
             else if (!string.IsNullOrEmpty(homeWorld) && !string.Equals(currentWorld, homeWorld, StringComparison.OrdinalIgnoreCase))
             {
-                steps.Add(new TransferStep(TransferStepType.World, homeWorld, $"/visit {homeWorld}", $"Return to {homeWorld}"));
+                steps.Add(new TransferStep(TransferStepType.World, homeWorld, BuildWorldVisitCommand(homeWorld), $"Return to {homeWorld}"));
             }
 
             if (!string.IsNullOrEmpty(targetDc) && !string.Equals(homeDc, targetDc, StringComparison.OrdinalIgnoreCase))
-                steps.Add(new TransferStep(TransferStepType.DataCenter, targetDc, $"/datacenter {targetDc}", $"Travel to {targetDc}"));
+                steps.Add(new TransferStep(TransferStepType.DataCenter, targetDc, BuildDataCenterVisitCommand(targetDc), $"Travel to {targetDc}"));
         }
 
-        steps.Add(new TransferStep(TransferStepType.World, targetWorld, $"/visit {targetWorld}", $"Visit {targetWorld}"));
+        steps.Add(new TransferStep(TransferStepType.World, targetWorld, BuildWorldVisitCommand(targetWorld), $"Visit {targetWorld}"));
 
         for (var i = 0; i < steps.Count; i++)
         {
@@ -689,5 +689,35 @@ public sealed class MacroRunner : IDisposable
     {
         DataCenter,
         World
+    }
+
+    private static string BuildTeleportCommand(string destination)
+    {
+        return BuildCommand("/teleport", destination);
+    }
+
+    private static string BuildWorldVisitCommand(string world)
+    {
+        return BuildCommand("/worldvisit", world);
+    }
+
+    private static string BuildDataCenterVisitCommand(string dataCenter)
+    {
+        return BuildCommand("/dcvisit", dataCenter);
+    }
+
+    private static string BuildCommand(string command, string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+            return command;
+
+        var trimmed = payload.Trim();
+        if (trimmed.Contains('"', StringComparison.Ordinal))
+            trimmed = trimmed.Replace("\"", "'", StringComparison.Ordinal);
+
+        if (trimmed.Any(char.IsWhiteSpace))
+            trimmed = $"\"{trimmed}\"";
+
+        return $"{command} {trimmed}";
     }
 }

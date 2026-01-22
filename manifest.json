@@ -1,32 +1,32 @@
 [
-  {
-    "Author": "ShoutRunner",
-    "Name": "ShoutRunner",
-    "InternalName": "ShoutRunner",
-    "AssemblyVersion": "1.0.0.5",
-    "Description": "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
-    "Punchline": "Timed shout/teleport/world/DC macros.",
-    "RepoUrl": "https://github.com/KeiJoi/ShoutRunner",
-    "ApplicableVersion": "any",
-    "DalamudApiLevel": 14,
-    "TestingDalamudApiLevel": 14,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/ShoutRunner.zip",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/ShoutRunner.zip",
-    "DownloadLinkTesting": "",
-    "DownloadLinkTestingUpdate": "",
-    "IconUrl": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png",
-    "Tags": [
-      "macro",
-      "teleport",
-      "automation",
-      "chat"
-    ],
-    "CategoryTags": [
-      "utility"
-    ],
-    "IsHide": false,
-    "IsTestingExclusive": false,
-    "Testing": false,
-    "LastUpdate": 1769083770
-  }
+    {
+        "Author": "ShoutRunner",
+        "Name": "ShoutRunner",
+        "InternalName": "ShoutRunner",
+        "AssemblyVersion": "1.0.0.6",
+        "Description": "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
+        "Punchline": "Timed shout/teleport/world/DC macros.",
+        "RepoUrl": "https://github.com/KeiJoi/ShoutRunner",
+        "ApplicableVersion": "any",
+        "DalamudApiLevel": 14,
+        "TestingDalamudApiLevel": 14,
+        "DownloadLinkInstall": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/ShoutRunner.zip",
+        "DownloadLinkUpdate": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/ShoutRunner.zip",
+        "DownloadLinkTesting": "",
+        "DownloadLinkTestingUpdate": "",
+        "IconUrl": "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png",
+        "Tags": [
+            "macro",
+            "teleport",
+            "automation",
+            "chat"
+        ],
+        "CategoryTags": [
+            "utility"
+        ],
+        "IsHide": false,
+        "IsTestingExclusive": false,
+        "Testing": false,
+        "LastUpdate": 1769086365
+    }
 ]

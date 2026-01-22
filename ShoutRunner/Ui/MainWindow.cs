@@ -271,7 +271,7 @@ public sealed class MainWindow : Window
             configuration.Save();
             newPayload = string.Empty;
         }
-        ImGui.TextDisabled("Shout uses /shout, teleport uses /teleport, world uses /visit (auto datacenter if needed).");
+        ImGui.TextDisabled("Shout uses /shout, teleport uses /teleport, world uses /worldvisit (auto data center if needed).");
     }
 
     private void EnsureTeleportDestinations()
