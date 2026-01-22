@@ -1,4 +1,4 @@
-{
+[
     "Author":  "ShoutRunner",
     "Name":  "ShoutRunner",
     "InternalName":  "ShoutRunner",
@@ -27,4 +27,4 @@
     "IsTestingExclusive":  false,
     "Testing":  false,
     "LastUpdate":  1769083770
-}
+]
