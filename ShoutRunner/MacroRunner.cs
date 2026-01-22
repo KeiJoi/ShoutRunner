@@ -308,8 +308,8 @@ public sealed class MacroRunner : IDisposable
                 continue;
 
             await WaitUntilChatReadyAsync(token);
-            chatGui.Print($"[ShoutRunner] Sending {cmd}");
-            await EnqueueCommandAsync(cmd, useECommons: false, token);
+            chatGui.Print($"[ShoutRunner] Sending {cmd} via ECommons");
+            await EnqueueCommandAsync(cmd, useECommons: true, token);
         }
     }
 
