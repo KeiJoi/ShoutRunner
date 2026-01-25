@@ -605,9 +605,38 @@ public sealed class MacroRunner : IDisposable
     private async Task<bool> WaitForWorldArrivalAsync(string targetWorld, CancellationToken token)
     {
         var target = targetWorld.Trim();
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(120);
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(3);
         var seenTransition = false;
+        var lifestreamStarted = false;
 
+        chatGui.Print($"[ShoutRunner] Waiting for world transfer to {target}...");
+
+        // First, wait for Lifestream to become busy (it needs to TP to aetheryte, interact, etc.)
+        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (DateTime.UtcNow < startDeadline)
+        {
+            token.ThrowIfCancellationRequested();
+
+            if (lifestreamIpc.TryIsBusy(out var busy))
+            {
+                if (busy)
+                {
+                    lifestreamStarted = true;
+                    chatGui.Print($"[ShoutRunner] Lifestream started processing world transfer");
+                    break;
+                }
+            }
+
+            await Task.Delay(500, token);
+        }
+
+        if (!lifestreamStarted)
+        {
+            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer");
+            return false;
+        }
+
+        // Now wait for the actual transfer to complete
         while (DateTime.UtcNow < deadline)
         {
             token.ThrowIfCancellationRequested();
@@ -619,23 +648,50 @@ public sealed class MacroRunner : IDisposable
                 continue;
             }
 
+            // Check if we're already at the destination (might have been quick)
+            var currentWorld = state.CurrentWorld;
+            if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+            {
+                // Wait for Lifestream to finish completely
+                if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
+                {
+                    chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
+                    return true;
+                }
+            }
+
             var transitioning = state.BetweenAreas || state.BetweenAreas51;
             if (transitioning)
-                seenTransition = true;
-
-            if (!transitioning)
             {
-                var currentWorld = state.CurrentWorld;
-                if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
-                    return true;
+                if (!seenTransition)
+                {
+                    seenTransition = true;
+                    chatGui.Print($"[ShoutRunner] World transfer in progress...");
+                }
+            }
 
-                if (seenTransition && !string.IsNullOrEmpty(currentWorld) && !string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+            if (!transitioning && seenTransition)
+            {
+                if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Wait for Lifestream to finish
+                    if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
+                    {
+                        chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
+                        return true;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(currentWorld))
+                {
+                    chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
                     return false;
+                }
             }
 
             await Task.Delay(500, token);
         }
 
+        chatGui.PrintError($"[ShoutRunner] World transfer timed out after 3 minutes");
         return false;
     }
 
@@ -685,8 +741,8 @@ public sealed class MacroRunner : IDisposable
 
         chatGui.Print($"[ShoutRunner] Waiting for DC transfer to {target}...");
 
-        // First, wait for Lifestream to start processing
-        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        // First, wait for Lifestream to start processing (may need to TP to aetheryte first)
+        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
@@ -698,12 +754,12 @@ public sealed class MacroRunner : IDisposable
                 break;
             }
 
-            await Task.Delay(200, token);
+            await Task.Delay(500, token);
         }
 
         if (!lifestreamStartedBusy)
         {
-            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer");
+            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer. Make sure you're near a main aetheryte.");
             return false;
         }
 
@@ -726,29 +782,45 @@ public sealed class MacroRunner : IDisposable
                 continue;
             }
 
-            // If we're logged in after seeing logout, check if Lifestream is still busy
-            if (seenLogout && state.IsLoggedIn && state.HasLocalPlayer)
+            // If we're logged in (either still waiting for logout or returned after logout)
+            if (state.IsLoggedIn && state.HasLocalPlayer)
             {
-                // Wait for Lifestream to finish all its tasks
-                if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
-                {
-                    // Give it a moment to fully settle
-                    await Task.Delay(2000, token);
+                var currentWorld = state.CurrentWorld;
 
-                    // Check final world
-                    var finalState = await GetGameStateAsync(token);
-                    if (finalState.IsLoggedIn && finalState.HasLocalPlayer)
+                // Check if we're already at destination (maybe we were already there)
+                if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
                     {
-                        var currentWorld = finalState.CurrentWorld;
-                        if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                        chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
+                        return true;
+                    }
+                }
+
+                // If we've seen a logout and are now logged back in
+                if (seenLogout)
+                {
+                    // Wait for Lifestream to finish all its tasks
+                    if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
+                    {
+                        // Give it a moment to fully settle
+                        await Task.Delay(2000, token);
+
+                        // Check final world
+                        var finalState = await GetGameStateAsync(token);
+                        if (finalState.IsLoggedIn && finalState.HasLocalPlayer)
                         {
-                            chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
-                            return true;
-                        }
-                        else
-                        {
-                            chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
-                            return false;
+                            currentWorld = finalState.CurrentWorld;
+                            if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                            {
+                                chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
+                                return true;
+                            }
+                            else if (!string.IsNullOrEmpty(currentWorld))
+                            {
+                                chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
+                                return false;
+                            }
                         }
                     }
                 }
