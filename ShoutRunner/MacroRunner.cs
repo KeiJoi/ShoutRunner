@@ -611,19 +611,39 @@ public sealed class MacroRunner : IDisposable
 
         chatGui.Print($"[ShoutRunner] Waiting for world transfer to {target}...");
 
-        // First, wait for Lifestream to become busy (it needs to TP to aetheryte, interact, etc.)
-        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        // Wait briefly for Lifestream to become busy or for something to happen
+        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
 
-            if (lifestreamIpc.TryIsBusy(out var busy))
+            var state = await GetGameStateAsync(token);
+
+            // Check if Lifestream is processing
+            if (lifestreamIpc.TryIsBusy(out var busy) && busy)
             {
-                if (busy)
+                lifestreamStarted = true;
+                chatGui.Print($"[ShoutRunner] Lifestream started processing world transfer");
+                break;
+            }
+
+            // Check if we're already transitioning (Lifestream might be moving us)
+            if (state.BetweenAreas || state.BetweenAreas51)
+            {
+                lifestreamStarted = true;
+                seenTransition = true;
+                chatGui.Print($"[ShoutRunner] World transfer in progress...");
+                break;
+            }
+
+            // Check if we're already at the destination
+            if (state.IsLoggedIn && state.HasLocalPlayer)
+            {
+                var currentWorld = state.CurrentWorld;
+                if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
                 {
-                    lifestreamStarted = true;
-                    chatGui.Print($"[ShoutRunner] Lifestream started processing world transfer");
-                    break;
+                    chatGui.Print($"[ShoutRunner] Already at {currentWorld}");
+                    return true;
                 }
             }
 
@@ -632,8 +652,7 @@ public sealed class MacroRunner : IDisposable
 
         if (!lifestreamStarted)
         {
-            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer");
-            return false;
+            chatGui.Print($"[ShoutRunner] Lifestream may be working (not reporting busy). Continuing to wait for transfer...");
         }
 
         // Now wait for the actual transfer to complete
@@ -741,12 +760,15 @@ public sealed class MacroRunner : IDisposable
 
         chatGui.Print($"[ShoutRunner] Waiting for DC transfer to {target}...");
 
-        // First, wait for Lifestream to start processing (may need to TP to aetheryte first)
-        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        // Wait briefly for Lifestream to start processing (may need to TP to aetheryte first)
+        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
 
+            var state = await GetGameStateAsync(token);
+
+            // Check if Lifestream is processing
             if (lifestreamIpc.TryIsBusy(out var busy) && busy)
             {
                 lifestreamStartedBusy = true;
@@ -754,13 +776,32 @@ public sealed class MacroRunner : IDisposable
                 break;
             }
 
+            // Check if we're already logged out (DC transfer started)
+            if (!state.IsLoggedIn)
+            {
+                lifestreamStartedBusy = true;
+                seenLogout = true;
+                chatGui.Print($"[ShoutRunner] Player logged out for DC transfer");
+                break;
+            }
+
+            // Check if we're already at destination
+            if (state.IsLoggedIn && state.HasLocalPlayer)
+            {
+                var currentWorld = state.CurrentWorld;
+                if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    chatGui.Print($"[ShoutRunner] Already at {currentWorld}");
+                    return true;
+                }
+            }
+
             await Task.Delay(500, token);
         }
 
         if (!lifestreamStartedBusy)
         {
-            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer. Make sure you're near a main aetheryte.");
-            return false;
+            chatGui.Print($"[ShoutRunner] Lifestream may be working (not reporting busy). Continuing to wait for DC transfer...");
         }
 
         // Wait for the transfer to complete
