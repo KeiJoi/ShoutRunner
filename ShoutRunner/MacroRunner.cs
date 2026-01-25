@@ -553,11 +553,13 @@ public sealed class MacroRunner : IDisposable
         }
 
         chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld} ({(isCrossDC ? "cross-DC" : "same-DC")})");
-        if (!lifestreamIpc.TryChangeWorld(targetWorld))
-        {
-            chatGui.PrintError($"[ShoutRunner] Lifestream rejected transfer to {targetWorld}.");
-            return false;
-        }
+
+        // Use Lifestream's command directly so we can see any error messages
+        chatGui.Print($"[ShoutRunner] Executing: /li {targetWorld}");
+        await IssueECommonsCommandAsync(token, $"/li {targetWorld}");
+
+        // Give Lifestream a moment to process the command
+        await Task.Delay(1000, token);
 
         SetProgress($"Travel to {targetWorld}", 0.5f);
 
