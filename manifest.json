@@ -3,7 +3,7 @@
         "Author": "ShoutRunner",
         "Name": "ShoutRunner",
         "InternalName": "ShoutRunner",
-        "AssemblyVersion": "1.0.0.7",
+        "AssemblyVersion": "1.0.0.8",
         "Description": "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
         "Punchline": "Timed shout/teleport/world/DC macros.",
         "RepoUrl": "https://github.com/KeiJoi/ShoutRunner",
@@ -27,6 +27,6 @@
         "IsHide": false,
         "IsTestingExclusive": false,
         "Testing": false,
-        "LastUpdate": 1769088499
+        "LastUpdate": 1769376749
     }
 ]

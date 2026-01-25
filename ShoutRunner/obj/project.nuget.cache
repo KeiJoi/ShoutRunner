@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "XnDIMHd02Pw=",
+  "dgSpecHash": "fsP60Svbt/c=",
   "success": true,
-  "projectFilePath": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
+  "projectFilePath": "c:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\kyro_\\.nuget\\packages\\dalamudpackager\\14.0.1\\dalamudpackager.14.0.1.nupkg.sha512",
     "C:\\Users\\kyro_\\.nuget\\packages\\dotnet.reproduciblebuilds\\1.2.39\\dotnet.reproduciblebuilds.1.2.39.nupkg.sha512",

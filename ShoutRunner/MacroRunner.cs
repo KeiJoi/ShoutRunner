@@ -545,7 +545,14 @@ public sealed class MacroRunner : IDisposable
         if (!await WaitForLifestreamReadyAsync(token))
             return false;
 
-        chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld}");
+        // Determine if this is a cross-DC transfer
+        var isCrossDC = false;
+        if (lifestreamIpc.TryCanVisitCrossDC(targetWorld, out var crossDC))
+        {
+            isCrossDC = crossDC;
+        }
+
+        chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld} ({(isCrossDC ? "cross-DC" : "same-DC")})");
         if (!lifestreamIpc.TryChangeWorld(targetWorld))
         {
             chatGui.PrintError($"[ShoutRunner] Lifestream rejected transfer to {targetWorld}.");
@@ -553,7 +560,16 @@ public sealed class MacroRunner : IDisposable
         }
 
         SetProgress($"Travel to {targetWorld}", 0.5f);
-        return await WaitForWorldArrivalAsync(targetWorld, token);
+
+        // DC transfers require different waiting logic due to logout/login
+        if (isCrossDC)
+        {
+            return await WaitForDataCenterTransferAsync(targetWorld, token);
+        }
+        else
+        {
+            return await WaitForWorldArrivalAsync(targetWorld, token);
+        }
     }
 
     private List<string> GetWorldFallbackList(string target)
@@ -656,6 +672,92 @@ public sealed class MacroRunner : IDisposable
             await Task.Delay(500, token);
         }
 
+        return false;
+    }
+
+    private async Task<bool> WaitForDataCenterTransferAsync(string targetWorld, CancellationToken token)
+    {
+        var target = targetWorld.Trim();
+        // DC transfers take much longer due to logout/login cycle
+        var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
+        var seenLogout = false;
+        var lifestreamStartedBusy = false;
+
+        chatGui.Print($"[ShoutRunner] Waiting for DC transfer to {target}...");
+
+        // First, wait for Lifestream to start processing
+        var startDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (DateTime.UtcNow < startDeadline)
+        {
+            token.ThrowIfCancellationRequested();
+
+            if (lifestreamIpc.TryIsBusy(out var busy) && busy)
+            {
+                lifestreamStartedBusy = true;
+                chatGui.Print($"[ShoutRunner] Lifestream started processing DC transfer");
+                break;
+            }
+
+            await Task.Delay(200, token);
+        }
+
+        if (!lifestreamStartedBusy)
+        {
+            chatGui.PrintError($"[ShoutRunner] Lifestream did not start processing the transfer");
+            return false;
+        }
+
+        // Wait for the transfer to complete
+        while (DateTime.UtcNow < deadline)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var state = await GetGameStateAsync(token);
+
+            // Track if we've seen a logout (player will be logged out during DC transfer)
+            if (!state.IsLoggedIn)
+            {
+                if (!seenLogout)
+                {
+                    seenLogout = true;
+                    chatGui.Print($"[ShoutRunner] Player logged out for DC transfer");
+                }
+                await Task.Delay(1000, token);
+                continue;
+            }
+
+            // If we're logged in after seeing logout, check if Lifestream is still busy
+            if (seenLogout && state.IsLoggedIn && state.HasLocalPlayer)
+            {
+                // Wait for Lifestream to finish all its tasks
+                if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
+                {
+                    // Give it a moment to fully settle
+                    await Task.Delay(2000, token);
+
+                    // Check final world
+                    var finalState = await GetGameStateAsync(token);
+                    if (finalState.IsLoggedIn && finalState.HasLocalPlayer)
+                    {
+                        var currentWorld = finalState.CurrentWorld;
+                        if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
+                        {
+                            chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
+                            return true;
+                        }
+                        else
+                        {
+                            chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            await Task.Delay(1000, token);
+        }
+
+        chatGui.PrintError($"[ShoutRunner] DC transfer timed out after 5 minutes");
         return false;
     }
 
