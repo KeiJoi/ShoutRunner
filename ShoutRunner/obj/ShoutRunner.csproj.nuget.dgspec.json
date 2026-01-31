@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj": {}
+    "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj": {}
   },
   "projects": {
-    "c:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj": {
+    "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
+        "projectUniqueName": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
         "projectName": "ShoutRunner",
-        "projectPath": "c:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
+        "projectPath": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
         "packagesPath": "C:\\Users\\kyro_\\.nuget\\packages\\",
-        "outputPath": "c:\\shoutrunner\\ShoutRunner\\obj\\",
+        "outputPath": "C:\\shoutrunner\\ShoutRunner\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

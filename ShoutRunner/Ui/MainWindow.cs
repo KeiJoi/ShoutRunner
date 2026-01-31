@@ -66,8 +66,12 @@ public sealed class MainWindow : Window
         ("Mateus", "Crystal"),
         ("Zalera", "Crystal"),
         ("Halicarnassus", "Dynamis"),
+        ("Cuchulainn", "Dynamis"),
+        ("Golem", "Dynamis"),
+        ("Kraken", "Dynamis"),
         ("Maduin", "Dynamis"),
         ("Marilith", "Dynamis"),
+        ("Rafflesia", "Dynamis"),
         ("Seraph", "Dynamis"),
     };
 

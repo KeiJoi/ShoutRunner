@@ -101,8 +101,12 @@ public sealed class MacroRunner : IDisposable
             ["Zalera"] = "Crystal",
             // Dynamis
             ["Halicarnassus"] = "Dynamis",
+            ["Cuchulainn"] = "Dynamis",
+            ["Golem"] = "Dynamis",
+            ["Kraken"] = "Dynamis",
             ["Maduin"] = "Dynamis",
             ["Marilith"] = "Dynamis",
+            ["Rafflesia"] = "Dynamis",
             ["Seraph"] = "Dynamis",
         };
 
@@ -133,8 +137,12 @@ public sealed class MacroRunner : IDisposable
             "Mateus",
             "Zalera",
             "Halicarnassus",
+            "Cuchulainn",
+            "Golem",
+            "Kraken",
             "Maduin",
             "Marilith",
+            "Rafflesia",
             "Seraph"
         };
     }

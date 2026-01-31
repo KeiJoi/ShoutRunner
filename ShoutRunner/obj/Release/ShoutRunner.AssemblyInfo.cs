@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ShoutRunner")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6a82fed625ad5c1ce2ced088e728e959b8feab8a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e88adeadd2abcc94e1990a3bca37307d0da8ff51")]
 [assembly: System.Reflection.AssemblyProductAttribute("ShoutRunner")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ShoutRunner")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
