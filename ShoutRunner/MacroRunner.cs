@@ -524,6 +524,7 @@ public sealed class MacroRunner : IDisposable
             if (await ExecuteWorldTransferAsync(candidate, token))
                 return;
 
+            lifestreamIpc.TryAbort();
             chatGui.PrintError($"[ShoutRunner] World visit failed: {candidate}. Trying next...");
         }
 
@@ -574,11 +575,17 @@ public sealed class MacroRunner : IDisposable
         // DC transfers require different waiting logic due to logout/login
         if (isCrossDC)
         {
-            return await WaitForDataCenterTransferAsync(targetWorld, token);
+            var arrived = await WaitForDataCenterTransferAsync(targetWorld, token);
+            if (!arrived)
+                lifestreamIpc.TryAbort();
+            return arrived;
         }
         else
         {
-            return await WaitForWorldArrivalAsync(targetWorld, token);
+            var arrived = await WaitForWorldArrivalAsync(targetWorld, token);
+            if (!arrived)
+                lifestreamIpc.TryAbort();
+            return arrived;
         }
     }
 

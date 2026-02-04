@@ -14,6 +14,12 @@ public sealed class Configuration : IPluginConfiguration
 
     public List<MacroPreset> Presets { get; set; } = new();
 
+    public string SimpleShout { get; set; } = string.Empty;
+
+    public List<string> SimpleServerOrder { get; set; } = new();
+
+    public List<string> SimpleTeleportOrder { get; set; } = new();
+
     public bool RepeatEnabled { get; set; } = true;
 
     public int IntervalHours { get; set; } = 0;

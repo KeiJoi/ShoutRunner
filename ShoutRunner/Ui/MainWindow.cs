@@ -28,6 +28,8 @@ public sealed class MainWindow : Window
     private string editTeleportFilter = string.Empty;
     private string presetName = string.Empty;
     private int presetIndex;
+    private int serverDragIndex = -1;
+    private int teleportDragIndex = -1;
 
     private static readonly string[] TeleportFallback =
     {
@@ -90,11 +92,28 @@ public sealed class MainWindow : Window
     {
         DrawStatus();
         ImGui.Separator();
-        DrawInterval();
-        ImGui.Separator();
-        DrawActions();
-        ImGui.Separator();
-        DrawPresets();
+
+        if (ImGui.BeginTabBar("##shoutrunner-tabs"))
+        {
+            if (ImGui.BeginTabItem("Advanced Macro"))
+            {
+                DrawInterval();
+                ImGui.Separator();
+                DrawActions();
+                ImGui.Separator();
+                DrawPresets();
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Simple Macro"))
+            {
+                DrawSimpleMacro();
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
+        }
+
         DrawProgress();
     }
 
@@ -273,6 +292,137 @@ public sealed class MainWindow : Window
             if (ImGui.Button("Cancel"))
                 editIndex = -1;
         }
+    }
+
+    private void DrawSimpleMacro()
+    {
+        EnsureSimpleDefaults();
+
+        ImGui.Text("Shout message");
+        ImGui.SetNextItemWidth(420);
+        var simpleShout = configuration.SimpleShout;
+        if (ImGui.InputText("##simple-shout", ref simpleShout, 256))
+        {
+            configuration.SimpleShout = simpleShout;
+            configuration.Save();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Order");
+        if (ImGui.BeginTable("##simple-order", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame))
+        {
+            ImGui.TableSetupColumn("Servers", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Teleports", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            DrawReorderableList("Servers", configuration.SimpleServerOrder, ref serverDragIndex);
+            ImGui.TableSetColumnIndex(1);
+            DrawReorderableList("Teleports", configuration.SimpleTeleportOrder, ref teleportDragIndex);
+
+            ImGui.EndTable();
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Sequence: server -> teleport -> shout -> teleport -> shout -> teleport -> shout -> next server.");
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(configuration.SimpleShout));
+        if (ImGui.Button("Apply To Macro"))
+        {
+            ApplySimpleMacro();
+        }
+        ImGui.EndDisabled();
+    }
+
+    private void EnsureSimpleDefaults()
+    {
+        if (configuration.SimpleServerOrder.Count == 0)
+        {
+            configuration.SimpleServerOrder = NorthAmericaWorlds.Select(w => w.World).ToList();
+        }
+
+        if (configuration.SimpleTeleportOrder.Count == 0)
+        {
+            configuration.SimpleTeleportOrder = new List<string>
+            {
+                "New Gridania",
+                "Ul'dah - Steps of Nald",
+                "Limsa Lominsa Lower Decks"
+            };
+        }
+    }
+
+    private void ApplySimpleMacro()
+    {
+        macroRunner.Stop();
+        configuration.Actions.Clear();
+
+        foreach (var server in configuration.SimpleServerOrder)
+        {
+            configuration.Actions.Add(new MacroAction
+            {
+                Type = MacroActionType.WorldVisit,
+                Payload = server
+            });
+
+            foreach (var teleport in configuration.SimpleTeleportOrder)
+            {
+                configuration.Actions.Add(new MacroAction
+                {
+                    Type = MacroActionType.Teleport,
+                    Payload = teleport
+                });
+
+                configuration.Actions.Add(new MacroAction
+                {
+                    Type = MacroActionType.Shout,
+                    Payload = configuration.SimpleShout
+                });
+            }
+        }
+
+        configuration.Save();
+    }
+
+    private void DrawReorderableList(string label, List<string> items, ref int dragIndex)
+    {
+        var height = Math.Max(120, items.Count * 22);
+        ImGui.BeginChild($"{label}##list", new Vector2(0, height), true);
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            ImGui.Selectable(items[i], false);
+
+            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(0))
+            {
+                dragIndex = i;
+            }
+
+            if (dragIndex >= 0 && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByActiveItem))
+            {
+                if (dragIndex != i)
+                {
+                    MoveListItem(items, dragIndex, i);
+                    dragIndex = i;
+                    configuration.Save();
+                }
+            }
+        }
+
+        if (!ImGui.IsMouseDragging(0))
+            dragIndex = -1;
+
+        ImGui.EndChild();
+    }
+
+    private static void MoveListItem(List<string> items, int from, int to)
+    {
+        if (from == to || from < 0 || from >= items.Count || to < 0 || to >= items.Count)
+            return;
+
+        var item = items[from];
+        items.RemoveAt(from);
+        items.Insert(to, item);
     }
 
     private void DrawActionEditor(string typeLabel, ref MacroActionType actionType, ref string payload, ref int teleportSelection, ref int worldSelection, ref string filter, bool allowCustomWorld)

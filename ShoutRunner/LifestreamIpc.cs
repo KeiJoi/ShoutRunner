@@ -11,6 +11,7 @@ public sealed class LifestreamIpc
     private readonly ICallGateSubscriber<bool> isBusy;
     private readonly ICallGateSubscriber<string, bool> canVisitCrossDC;
     private readonly ICallGateSubscriber<string, bool> canVisitSameDC;
+    private readonly ICallGateSubscriber<object?> abort;
 
     public LifestreamIpc(IDalamudPluginInterface pluginInterface)
     {
@@ -18,6 +19,7 @@ public sealed class LifestreamIpc
         isBusy = pluginInterface.GetIpcSubscriber<bool>("Lifestream.IsBusy");
         canVisitCrossDC = pluginInterface.GetIpcSubscriber<string, bool>("Lifestream.CanVisitCrossDC");
         canVisitSameDC = pluginInterface.GetIpcSubscriber<string, bool>("Lifestream.CanVisitSameDC");
+        abort = pluginInterface.GetIpcSubscriber<object?>("Lifestream.Abort");
     }
 
     public bool TryChangeWorld(string world)
@@ -90,6 +92,18 @@ public sealed class LifestreamIpc
         {
             isSameDC = false;
             return false;
+        }
+    }
+
+    public void TryAbort()
+    {
+        try
+        {
+            abort.InvokeAction();
+        }
+        catch
+        {
+            // ignore
         }
     }
 }
