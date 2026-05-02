@@ -2,7 +2,7 @@
   "Author": "ShoutRunner",
   "Name": "ShoutRunner",
   "InternalName": "ShoutRunner",
-  "AssemblyVersion": "1.0.0.0",
+  "AssemblyVersion": "1.0.1.4",
   "Description": "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
   "ApplicableVersion": "any",
   "RepoUrl": "",
@@ -15,7 +15,7 @@
   "CategoryTags": [
     "utility"
   ],
-  "DalamudApiLevel": 14,
+  "DalamudApiLevel": 15,
   "LoadRequiredState": 0,
   "LoadSync": false,
   "CanUnloadAsync": true,

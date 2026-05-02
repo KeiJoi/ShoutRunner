@@ -1,6 +1,7 @@
 param(
     [string]$ManifestPath = "manifest.json",
-    [string]$PluginPath = "ShoutRunner\\ShoutRunner.json"
+    [string]$PluginPath = "ShoutRunner\\ShoutRunner.json",
+    [string]$ProjectPath = "ShoutRunner\\ShoutRunner.csproj"
 )
 
 $manifestContent = Get-Content $ManifestPath -Raw | ConvertFrom-Json
@@ -25,5 +26,11 @@ $manifest | ConvertTo-Json -Depth 10 | Set-Content $ManifestPath
 $plugin = Get-Content $PluginPath -Raw | ConvertFrom-Json
 $plugin.AssemblyVersion = $newVersion
 $plugin | ConvertTo-Json -Depth 10 | Set-Content $PluginPath
+
+$project = Get-Content $ProjectPath -Raw
+$project = [System.Text.RegularExpressions.Regex]::Replace($project, "<Version>.*?</Version>", "<Version>$newVersion</Version>")
+$project = [System.Text.RegularExpressions.Regex]::Replace($project, "<AssemblyVersion>.*?</AssemblyVersion>", "<AssemblyVersion>$newVersion</AssemblyVersion>")
+$project = [System.Text.RegularExpressions.Regex]::Replace($project, "<FileVersion>.*?</FileVersion>", "<FileVersion>$newVersion</FileVersion>")
+Set-Content $ProjectPath $project
 
 Write-Output "$newVersion $epoch"

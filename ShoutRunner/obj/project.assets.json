@@ -2,7 +2,7 @@
   "version": 3,
   "targets": {
     "net10.0-windows7.0": {
-      "DalamudPackager/14.0.1": {
+      "DalamudPackager/14.0.2": {
         "type": "package",
         "build": {
           "build/DalamudPackager.props": {},
@@ -74,17 +74,17 @@
     }
   },
   "libraries": {
-    "DalamudPackager/14.0.1": {
-      "sha512": "y0WWyUE6dhpGdolK3iKgwys05/nZaVf4ZPtIjpLhJBZvHxkkiE23zYRo7K7uqAgoK/QvK5cqF6l3VG5AbgC6KA==",
+    "DalamudPackager/14.0.2": {
+      "sha512": "dQJeq+8eyHzra4Cg5eZ/3LAeS3/UpvvLriYJGSncMK9LqJ7Q4B6jwcOsxo3PfxVd15xj+IzVFxkPqIBmPQu8/w==",
       "type": "package",
-      "path": "dalamudpackager/14.0.1",
+      "path": "dalamudpackager/14.0.2",
       "files": [
         ".nupkg.metadata",
         ".signature.p7s",
         "build/DalamudPackager.props",
         "build/DalamudPackager.targets",
         "buildMultiTargeting/DalamudPackager.props",
-        "dalamudpackager.14.0.1.nupkg.sha512",
+        "dalamudpackager.14.0.2.nupkg.sha512",
         "dalamudpackager.nuspec",
         "tasks/net48/DalamudPackager.dll",
         "tasks/net48/Newtonsoft.Json.dll",
@@ -149,23 +149,23 @@
   },
   "projectFileDependencyGroups": {
     "net10.0-windows7.0": [
-      "DalamudPackager >= 14.0.1",
+      "DalamudPackager >= 14.0.2",
       "DotNet.ReproducibleBuilds >= 1.2.39",
       "ECommons >= 3.1.0.16",
       "ImGui.NET >= 1.90.7.1"
     ]
   },
   "packageFolders": {
-    "C:\\Users\\kyro_\\.nuget\\packages\\": {},
+    "c:\\shoutrunner\\.dotnet\\.nuget\\packages\\": {},
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "1.0.0",
+    "version": "1.0.1.4",
     "restore": {
       "projectUniqueName": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
       "projectName": "ShoutRunner",
       "projectPath": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
-      "packagesPath": "C:\\Users\\kyro_\\.nuget\\packages\\",
+      "packagesPath": "c:\\shoutrunner\\.dotnet\\.nuget\\packages\\",
       "outputPath": "C:\\shoutrunner\\ShoutRunner\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
@@ -211,7 +211,7 @@
         "dependencies": {
           "DalamudPackager": {
             "target": "Package",
-            "version": "[14.0.1, )"
+            "version": "[14.0.2, )"
           },
           "DotNet.ReproducibleBuilds": {
             "suppressParent": "All",

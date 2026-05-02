@@ -4,8 +4,8 @@
     "Description":  "Create repeating macros that shout, teleport, or travel between worlds/data centers on a timer.",
     "RepoUrl":  "",
     "Punchline":  "Timed shout/teleport/world/DC macros.",
-    "DalamudApiLevel":  14,
-    "TestingDalamudApiLevel":  14,
+    "DalamudApiLevel":  15,
+    "TestingDalamudApiLevel":  15,
     "ApplicableVersion":  "any",
     "Tags":  [
                  "macro",
@@ -22,7 +22,7 @@
     "TestingPrefixes":  [
 
                         ],
-    "AssemblyVersion":  "1.0.1.3",
+    "AssemblyVersion":  "1.0.1.4",
     "Changelog":  "",
     "ImageUrls":  [
                       "https://raw.githubusercontent.com/KeiJoi/ShoutRunner/main/icon.png"

@@ -5,12 +5,12 @@
   },
   "projects": {
     "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj": {
-      "version": "1.0.0",
+      "version": "1.0.1.4",
       "restore": {
         "projectUniqueName": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
         "projectName": "ShoutRunner",
         "projectPath": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
-        "packagesPath": "C:\\Users\\kyro_\\.nuget\\packages\\",
+        "packagesPath": "c:\\shoutrunner\\.dotnet\\.nuget\\packages\\",
         "outputPath": "C:\\shoutrunner\\ShoutRunner\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
@@ -56,7 +56,7 @@
           "dependencies": {
             "DalamudPackager": {
               "target": "Package",
-              "version": "[14.0.1, )"
+              "version": "[14.0.2, )"
             },
             "DotNet.ReproducibleBuilds": {
               "suppressParent": "All",
