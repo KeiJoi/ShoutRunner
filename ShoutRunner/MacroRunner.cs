@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Game;
+using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
@@ -38,6 +39,10 @@ public sealed class MacroRunner : IDisposable
     private readonly Dictionary<uint, string> aetheryteNames = new();
     private readonly Dictionary<uint, string> territoryNames = new();
     private bool teleportDataLoaded;
+    private readonly object transferMonitorLock = new();
+    private string monitoredTransferWorld = string.Empty;
+    private int monitoredTransferCongestionCount;
+    private bool monitoredTransferShouldSkip;
 
     private CancellationTokenSource? executionCts;
     private bool executing;
@@ -47,6 +52,19 @@ public sealed class MacroRunner : IDisposable
     public DateTime? NextRun { get; private set; }
 
     public string LastError { get; private set; } = string.Empty;
+
+    private enum ActionExecutionResult
+    {
+        Continue,
+        SkipToNextWorldTransfer
+    }
+
+    private enum TransferExecutionResult
+    {
+        Success,
+        Failed,
+        SkipToNextWorldTransfer
+    }
 
     public bool TryGetProgress(out float value, out string label)
     {
@@ -69,6 +87,7 @@ public sealed class MacroRunner : IDisposable
         this.dataManager = dataManager;
         this.lifestreamIpc = lifestreamIpc;
         this.framework = framework;
+        chatGui.ChatMessageUnhandled += OnChatMessageUnhandled;
 
         worldToDataCenter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -190,7 +209,17 @@ public sealed class MacroRunner : IDisposable
                     var action = config.Actions[i];
                     executionCts.Token.ThrowIfCancellationRequested();
                     SetProgress($"Action {i + 1}/{total}: {action.FriendlyName}", total == 0 ? 0f : (float)i / total);
-                    await ExecuteActionAsync(action, executionCts.Token);
+                    var result = await ExecuteActionAsync(action, executionCts.Token);
+                    if (result == ActionExecutionResult.SkipToNextWorldTransfer)
+                    {
+                        var nextTransferIndex = FindNextWorldTransferIndex(i + 1);
+                        if (nextTransferIndex < 0)
+                            break;
+
+                        i = nextTransferIndex - 1;
+                        continue;
+                    }
+
                     var delaySeconds = Math.Max(0, config.ClampDelaySeconds());
                     if (delaySeconds > 0)
                         await Task.Delay(TimeSpan.FromSeconds(delaySeconds), executionCts.Token);
@@ -221,10 +250,22 @@ public sealed class MacroRunner : IDisposable
         });
     }
 
-    private async Task ExecuteActionAsync(MacroAction action, CancellationToken token)
+    private int FindNextWorldTransferIndex(int startIndex)
+    {
+        for (var i = Math.Max(0, startIndex); i < config.Actions.Count; i++)
+        {
+            var type = config.Actions[i].Type;
+            if (type == MacroActionType.WorldVisit || type == MacroActionType.DataCenterVisit)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private async Task<ActionExecutionResult> ExecuteActionAsync(MacroAction action, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(action.Payload))
-            return;
+            return ActionExecutionResult.Continue;
 
         var payload = action.Payload.Trim();
         switch (action.Type)
@@ -238,16 +279,18 @@ public sealed class MacroRunner : IDisposable
                     await WaitForCompletionAsync(action, token);
                 break;
             case MacroActionType.WorldVisit:
-                await ExecuteWorldVisitWithFallbackAsync(payload, token);
-                break;
+                return await ExecuteWorldVisitWithFallbackAsync(payload, token);
             case MacroActionType.DataCenterVisit:
                 await ExecuteDataCenterVisitAsync(payload, token);
                 break;
         }
+
+        return ActionExecutionResult.Continue;
     }
 
     public void Dispose()
     {
+        chatGui.ChatMessageUnhandled -= OnChatMessageUnhandled;
         Stop();
     }
 
@@ -511,24 +554,28 @@ public sealed class MacroRunner : IDisposable
         }
     }
 
-    private async Task ExecuteWorldVisitWithFallbackAsync(string world, CancellationToken token)
+    private async Task<ActionExecutionResult> ExecuteWorldVisitWithFallbackAsync(string world, CancellationToken token)
     {
         var target = world.Trim();
         if (string.IsNullOrEmpty(target))
-            return;
+            return ActionExecutionResult.Continue;
 
         var candidates = GetWorldFallbackList(target);
         foreach (var candidate in candidates)
         {
             chatGui.Print($"[ShoutRunner] World visit attempt via Lifestream: {candidate}");
-            if (await ExecuteWorldTransferAsync(candidate, token))
-                return;
+            var result = await ExecuteWorldTransferAsync(candidate, token);
+            if (result == TransferExecutionResult.Success)
+                return ActionExecutionResult.Continue;
+            if (result == TransferExecutionResult.SkipToNextWorldTransfer)
+                return ActionExecutionResult.SkipToNextWorldTransfer;
 
             lifestreamIpc.TryAbort();
             chatGui.PrintError($"[ShoutRunner] World visit failed: {candidate}. Trying next...");
         }
 
         chatGui.PrintError("[ShoutRunner] All world visit attempts failed; staying on current world.");
+        return ActionExecutionResult.Continue;
     }
 
     private async Task ExecuteDataCenterVisitAsync(string dataCenter, CancellationToken token)
@@ -548,11 +595,74 @@ public sealed class MacroRunner : IDisposable
         await ExecuteWorldTransferAsync(world, token);
     }
 
-    private async Task<bool> ExecuteWorldTransferAsync(string targetWorld, CancellationToken token)
+    private void BeginTransferMonitoring(string targetWorld)
+    {
+        lock (transferMonitorLock)
+        {
+            monitoredTransferWorld = targetWorld.Trim();
+            monitoredTransferCongestionCount = 0;
+            monitoredTransferShouldSkip = false;
+        }
+    }
+
+    private void EndTransferMonitoring()
+    {
+        lock (transferMonitorLock)
+        {
+            monitoredTransferWorld = string.Empty;
+            monitoredTransferCongestionCount = 0;
+            monitoredTransferShouldSkip = false;
+        }
+    }
+
+    private bool ShouldSkipCurrentTransfer()
+    {
+        lock (transferMonitorLock)
+        {
+            return monitoredTransferShouldSkip;
+        }
+    }
+
+    private void OnChatMessageUnhandled(IChatMessage message)
+    {
+        var text = message.Message.TextValue;
+        if (string.IsNullOrWhiteSpace(text) || !IsCongestedTransferMessage(text))
+            return;
+
+        lock (transferMonitorLock)
+        {
+            if (string.IsNullOrWhiteSpace(monitoredTransferWorld))
+                return;
+
+            monitoredTransferCongestionCount++;
+            if (monitoredTransferCongestionCount >= 2)
+            {
+                monitoredTransferShouldSkip = true;
+                chatGui.PrintError($"[ShoutRunner] Congested-world response detected twice for {monitoredTransferWorld}.");
+            }
+            else
+            {
+                chatGui.Print($"[ShoutRunner] Congested-world response detected for {monitoredTransferWorld} ({monitoredTransferCongestionCount}/2).");
+            }
+        }
+    }
+
+    private static bool IsCongestedTransferMessage(string text)
+    {
+        return text.Contains("congested", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("world is full", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("please wait until the world has become less congested", StringComparison.OrdinalIgnoreCase)
+            || (text.Contains("unable to visit", StringComparison.OrdinalIgnoreCase)
+                && text.Contains("try again", StringComparison.OrdinalIgnoreCase))
+            || (text.Contains("unable to travel", StringComparison.OrdinalIgnoreCase)
+                && text.Contains("try again", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<TransferExecutionResult> ExecuteWorldTransferAsync(string targetWorld, CancellationToken token)
     {
         await WaitUntilChatReadyAsync(token);
         if (!await WaitForLifestreamReadyAsync(token))
-            return false;
+            return TransferExecutionResult.Failed;
 
         // Determine if this is a cross-DC transfer
         var isCrossDC = false;
@@ -561,31 +671,48 @@ public sealed class MacroRunner : IDisposable
             isCrossDC = crossDC;
         }
 
-        chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld} ({(isCrossDC ? "cross-DC" : "same-DC")})");
-
-        // Use Lifestream's command directly so we can see any error messages
-        chatGui.Print($"[ShoutRunner] Executing: /li {targetWorld}");
-        await IssueECommonsCommandAsync(token, $"/li {targetWorld}");
-
-        // Give Lifestream a moment to process the command
-        await Task.Delay(1000, token);
-
-        SetProgress($"Travel to {targetWorld}", 0.5f);
-
-        // DC transfers require different waiting logic due to logout/login
-        if (isCrossDC)
+        BeginTransferMonitoring(targetWorld);
+        try
         {
-            var arrived = await WaitForDataCenterTransferAsync(targetWorld, token);
-            if (!arrived)
+            chatGui.Print($"[ShoutRunner] Lifestream transfer to {targetWorld} ({(isCrossDC ? "cross-DC" : "same-DC")})");
+
+            // Use Lifestream's command directly so we can see any error messages
+            chatGui.Print($"[ShoutRunner] Executing: /li {targetWorld}");
+            await IssueECommonsCommandAsync(token, $"/li {targetWorld}");
+
+            // Give Lifestream a moment to process the command
+            await Task.Delay(1000, token);
+
+            SetProgress($"Travel to {targetWorld}", 0.5f);
+
+            TransferExecutionResult result;
+            if (isCrossDC)
+            {
+                result = await WaitForDataCenterTransferAsync(targetWorld, token);
+            }
+            else
+            {
+                result = await WaitForWorldArrivalAsync(targetWorld, token);
+            }
+
+            if (result == TransferExecutionResult.SkipToNextWorldTransfer)
+            {
                 lifestreamIpc.TryAbort();
-            return arrived;
+                chatGui.PrintError($"[ShoutRunner] {targetWorld} reported congestion twice. Waiting 5 seconds and skipping to the next world transfer.");
+                await Task.Delay(TimeSpan.FromSeconds(5), token);
+                return TransferExecutionResult.SkipToNextWorldTransfer;
+            }
+
+            if (result == TransferExecutionResult.Failed)
+            {
+                lifestreamIpc.TryAbort();
+            }
+
+            return result;
         }
-        else
+        finally
         {
-            var arrived = await WaitForWorldArrivalAsync(targetWorld, token);
-            if (!arrived)
-                lifestreamIpc.TryAbort();
-            return arrived;
+            EndTransferMonitoring();
         }
     }
 
@@ -619,7 +746,7 @@ public sealed class MacroRunner : IDisposable
         return string.Empty;
     }
 
-    private async Task<bool> WaitForWorldArrivalAsync(string targetWorld, CancellationToken token)
+    private async Task<TransferExecutionResult> WaitForWorldArrivalAsync(string targetWorld, CancellationToken token)
     {
         var target = targetWorld.Trim();
         var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(3);
@@ -633,6 +760,8 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
@@ -660,7 +789,7 @@ public sealed class MacroRunner : IDisposable
                 if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
                 {
                     chatGui.Print($"[ShoutRunner] Already at {currentWorld}");
-                    return true;
+                    return TransferExecutionResult.Success;
                 }
             }
 
@@ -676,6 +805,8 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             token.ThrowIfCancellationRequested();
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
             if (!state.IsLoggedIn || !state.HasLocalPlayer)
@@ -692,7 +823,7 @@ public sealed class MacroRunner : IDisposable
                 if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
                 {
                     chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
-                    return true;
+                    return TransferExecutionResult.Success;
                 }
             }
 
@@ -714,13 +845,13 @@ public sealed class MacroRunner : IDisposable
                     if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
                     {
                         chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
-                        return true;
+                        return TransferExecutionResult.Success;
                     }
                 }
                 else if (!string.IsNullOrEmpty(currentWorld))
                 {
                     chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
-                    return false;
+                    return TransferExecutionResult.Failed;
                 }
             }
 
@@ -728,7 +859,7 @@ public sealed class MacroRunner : IDisposable
         }
 
         chatGui.PrintError($"[ShoutRunner] World transfer timed out after 3 minutes");
-        return false;
+        return TransferExecutionResult.Failed;
     }
 
     private async Task<bool> WaitForDataCenterArrivalAsync(string targetDc, CancellationToken token)
@@ -767,7 +898,7 @@ public sealed class MacroRunner : IDisposable
         return false;
     }
 
-    private async Task<bool> WaitForDataCenterTransferAsync(string targetWorld, CancellationToken token)
+    private async Task<TransferExecutionResult> WaitForDataCenterTransferAsync(string targetWorld, CancellationToken token)
     {
         var target = targetWorld.Trim();
         // DC transfers take much longer due to logout/login cycle
@@ -782,6 +913,8 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
@@ -809,7 +942,7 @@ public sealed class MacroRunner : IDisposable
                 if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
                 {
                     chatGui.Print($"[ShoutRunner] Already at {currentWorld}");
-                    return true;
+                    return TransferExecutionResult.Success;
                 }
             }
 
@@ -825,6 +958,8 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             token.ThrowIfCancellationRequested();
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
@@ -851,7 +986,7 @@ public sealed class MacroRunner : IDisposable
                     if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
                     {
                         chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
-                        return true;
+                        return TransferExecutionResult.Success;
                     }
                 }
 
@@ -872,12 +1007,12 @@ public sealed class MacroRunner : IDisposable
                             if (!string.IsNullOrEmpty(currentWorld) && string.Equals(currentWorld, target, StringComparison.OrdinalIgnoreCase))
                             {
                                 chatGui.Print($"[ShoutRunner] Successfully arrived at {currentWorld}");
-                                return true;
+                                return TransferExecutionResult.Success;
                             }
                             else if (!string.IsNullOrEmpty(currentWorld))
                             {
                                 chatGui.PrintError($"[ShoutRunner] Transfer completed but arrived at {currentWorld} instead of {target}");
-                                return false;
+                                return TransferExecutionResult.Failed;
                             }
                         }
                     }
@@ -888,7 +1023,7 @@ public sealed class MacroRunner : IDisposable
         }
 
         chatGui.PrintError($"[ShoutRunner] DC transfer timed out after 5 minutes");
-        return false;
+        return TransferExecutionResult.Failed;
     }
 
     private async Task<bool> TryTeleportAsync(string destination, CancellationToken token)

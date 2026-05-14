@@ -18,6 +18,8 @@ public sealed class Configuration : IPluginConfiguration
 
     public List<string> SimpleServerOrder { get; set; } = new();
 
+    public List<string> SimpleSelectedWorlds { get; set; } = new();
+
     public List<string> SimpleTeleportOrder { get; set; } = new();
 
     public bool RepeatEnabled { get; set; } = true;

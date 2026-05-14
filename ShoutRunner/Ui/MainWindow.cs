@@ -297,6 +297,7 @@ public sealed class MainWindow : Window
     private void DrawSimpleMacro()
     {
         EnsureSimpleDefaults();
+        var selectedWorldCount = configuration.SimpleSelectedWorlds.Count;
 
         ImGui.Text("Shout message");
         ImGui.SetNextItemWidth(420);
@@ -309,6 +310,18 @@ public sealed class MainWindow : Window
 
         ImGui.Separator();
         ImGui.Text("Order");
+        ImGui.TextDisabled($"Selected worlds: {selectedWorldCount}/{NorthAmericaWorlds.Length}");
+        if (ImGui.Button("Select All"))
+        {
+            configuration.SimpleSelectedWorlds = configuration.SimpleServerOrder.ToList();
+            configuration.Save();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Deselect All"))
+        {
+            configuration.SimpleSelectedWorlds.Clear();
+            configuration.Save();
+        }
         if (ImGui.BeginTable("##simple-order", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableSetupColumn("Servers", ImGuiTableColumnFlags.WidthStretch);
@@ -317,7 +330,7 @@ public sealed class MainWindow : Window
 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
-            DrawReorderableList("Servers", configuration.SimpleServerOrder, ref serverDragIndex);
+            DrawReorderableList("Servers", configuration.SimpleServerOrder, ref serverDragIndex, configuration.SimpleSelectedWorlds);
             ImGui.TableSetColumnIndex(1);
             DrawReorderableList("Teleports", configuration.SimpleTeleportOrder, ref teleportDragIndex);
 
@@ -325,8 +338,8 @@ public sealed class MainWindow : Window
         }
 
         ImGui.Separator();
-        ImGui.TextDisabled("Sequence: server -> teleport -> shout -> teleport -> shout -> teleport -> shout -> next server.");
-        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(configuration.SimpleShout));
+        ImGui.TextDisabled("Sequence: selected server -> teleport -> shout -> teleport -> shout -> teleport -> shout -> next selected server.");
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(configuration.SimpleShout) || selectedWorldCount == 0);
         if (ImGui.Button("Apply To Macro"))
         {
             ApplySimpleMacro();
@@ -336,9 +349,31 @@ public sealed class MainWindow : Window
 
     private void EnsureSimpleDefaults()
     {
+        var changed = false;
         if (configuration.SimpleServerOrder.Count == 0)
         {
             configuration.SimpleServerOrder = NorthAmericaWorlds.Select(w => w.World).ToList();
+            changed = true;
+        }
+
+        if (configuration.SimpleSelectedWorlds.Count == 0)
+        {
+            configuration.SimpleSelectedWorlds = configuration.SimpleServerOrder.ToList();
+            changed = true;
+        }
+        else
+        {
+            var validWorlds = new HashSet<string>(configuration.SimpleServerOrder, StringComparer.OrdinalIgnoreCase);
+            var filtered = configuration.SimpleSelectedWorlds
+                .Where(validWorlds.Contains)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (filtered.Count != configuration.SimpleSelectedWorlds.Count)
+            {
+                configuration.SimpleSelectedWorlds = filtered;
+                changed = true;
+            }
         }
 
         if (configuration.SimpleTeleportOrder.Count == 0)
@@ -349,6 +384,12 @@ public sealed class MainWindow : Window
                 "Ul'dah - Steps of Nald",
                 "Limsa Lominsa Lower Decks"
             };
+            changed = true;
+        }
+
+        if (changed)
+        {
+            configuration.Save();
         }
     }
 
@@ -356,9 +397,13 @@ public sealed class MainWindow : Window
     {
         macroRunner.Stop();
         configuration.Actions.Clear();
+        var selectedWorlds = new HashSet<string>(configuration.SimpleSelectedWorlds, StringComparer.OrdinalIgnoreCase);
 
         foreach (var server in configuration.SimpleServerOrder)
         {
+            if (!selectedWorlds.Contains(server))
+                continue;
+
             configuration.Actions.Add(new MacroAction
             {
                 Type = MacroActionType.WorldVisit,
@@ -384,14 +429,23 @@ public sealed class MainWindow : Window
         configuration.Save();
     }
 
-    private void DrawReorderableList(string label, List<string> items, ref int dragIndex)
+    private void DrawReorderableList(string label, List<string> items, ref int dragIndex, List<string>? selectedItems = null)
     {
         var height = Math.Max(120, items.Count * 22);
         ImGui.BeginChild($"{label}##list", new Vector2(0, height), true);
 
         for (var i = 0; i < items.Count; i++)
         {
-            ImGui.Selectable(items[i], false);
+            var isSelected = selectedItems?.Contains(items[i], StringComparer.OrdinalIgnoreCase) ?? false;
+            if (ImGui.Selectable(items[i], isSelected) && selectedItems != null)
+            {
+                if (isSelected)
+                    selectedItems.RemoveAll(item => string.Equals(item, items[i], StringComparison.OrdinalIgnoreCase));
+                else
+                    selectedItems.Add(items[i]);
+
+                configuration.Save();
+            }
 
             if (ImGui.IsItemActive() && ImGui.IsMouseDragging(0))
             {
