@@ -13,6 +13,7 @@ using ECommons.Automation;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using Lumina.Excel.Sheets;
 
 namespace ShoutRunner;
@@ -43,6 +44,7 @@ public sealed class MacroRunner : IDisposable
     private string monitoredTransferWorld = string.Empty;
     private int monitoredTransferCongestionCount;
     private bool monitoredTransferShouldSkip;
+    private const int EscapeVirtualKey = 0x1B;
 
     private CancellationTokenSource? executionCts;
     private bool executing;
@@ -624,6 +626,51 @@ public sealed class MacroRunner : IDisposable
         }
     }
 
+    private async Task DismissTransferUiAsync(CancellationToken token)
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            await TryDismissTransferUiOnceAsync(token);
+
+            await Task.Delay(250, token);
+        }
+    }
+
+    private async Task TryDismissTransferUiOnceAsync(CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(() => tcs.TrySetCanceled(token));
+
+        _ = framework.RunOnFrameworkThread(() =>
+        {
+            try
+            {
+                unsafe
+                {
+                    var agent = AgentWorldTravel.Instance();
+                    if (agent != null)
+                    {
+                        if (agent->IsAddonShown() || agent->IsAgentActive() || agent->IsAddonReady())
+                        {
+                            agent->HideAddon();
+                            agent->Hide();
+                        }
+                    }
+                }
+
+                WindowsKeypress.SendKeypress(EscapeVirtualKey);
+                tcs.TrySetResult();
+            }
+            catch
+            {
+                tcs.TrySetResult();
+            }
+        });
+
+        await tcs.Task;
+    }
+
     private void OnChatMessageUnhandled(IChatMessage message)
     {
         var text = message.Message.TextValue;
@@ -705,6 +752,7 @@ public sealed class MacroRunner : IDisposable
             if (result == TransferExecutionResult.SkipToNextWorldTransfer)
             {
                 lifestreamIpc.TryAbort();
+                await DismissTransferUiAsync(token);
                 chatGui.PrintError($"[ShoutRunner] {targetWorld} reported congestion twice. Waiting 5 seconds and skipping to the next world transfer.");
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
                 return TransferExecutionResult.SkipToNextWorldTransfer;
@@ -713,6 +761,7 @@ public sealed class MacroRunner : IDisposable
             if (result == TransferExecutionResult.Failed)
             {
                 lifestreamIpc.TryAbort();
+                await DismissTransferUiAsync(token);
             }
 
             return result;

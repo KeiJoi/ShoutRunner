@@ -4,9 +4,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ShoutRunner</AssemblyName>
-    <Version>1.0.1.11</Version>
-    <AssemblyVersion>1.0.1.11</AssemblyVersion>
-    <FileVersion>1.0.1.11</FileVersion>
+    <Version>1.0.1.13</Version>
+    <AssemblyVersion>1.0.1.13</AssemblyVersion>
+    <FileVersion>1.0.1.13</FileVersion>
     <RootNamespace>ShoutRunner</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
