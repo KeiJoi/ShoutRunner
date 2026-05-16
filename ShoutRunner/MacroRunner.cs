@@ -58,14 +58,16 @@ public sealed class MacroRunner : IDisposable
     private enum ActionExecutionResult
     {
         Continue,
-        SkipToNextWorldTransfer
+        SkipToNextWorldTransfer,
+        SkipToNextDataCenterTransfer
     }
 
     private enum TransferExecutionResult
     {
         Success,
         Failed,
-        SkipToNextWorldTransfer
+        SkipToNextWorldTransfer,
+        SkipToNextDataCenterTransfer
     }
 
     public bool TryGetProgress(out float value, out string label)
@@ -223,6 +225,16 @@ public sealed class MacroRunner : IDisposable
                         continue;
                     }
 
+                    if (result == ActionExecutionResult.SkipToNextDataCenterTransfer)
+                    {
+                        var nextTransferIndex = FindNextDifferentDataCenterTransferIndex(i + 1, action.Payload);
+                        if (nextTransferIndex < 0)
+                            break;
+
+                        i = nextTransferIndex - 1;
+                        continue;
+                    }
+
                     var delaySeconds = Math.Max(0, config.ClampDelaySeconds());
                     if (delaySeconds > 0)
                         await Task.Delay(TimeSpan.FromSeconds(delaySeconds), executionCts.Token);
@@ -265,6 +277,29 @@ public sealed class MacroRunner : IDisposable
         return -1;
     }
 
+    private int FindNextDifferentDataCenterTransferIndex(int startIndex, string currentTarget)
+    {
+        var currentDc = GetDataCenterForWorld(currentTarget);
+        for (var i = Math.Max(0, startIndex); i < config.Actions.Count; i++)
+        {
+            var action = config.Actions[i];
+            if (action.Type != MacroActionType.WorldVisit && action.Type != MacroActionType.DataCenterVisit)
+                continue;
+
+            var nextDc = action.Type == MacroActionType.DataCenterVisit
+                ? action.Payload.Trim()
+                : GetDataCenterForWorld(action.Payload);
+
+            if (string.IsNullOrWhiteSpace(nextDc))
+                continue;
+
+            if (!string.Equals(nextDc, currentDc, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
+    }
+
     private async Task<ActionExecutionResult> ExecuteActionAsync(MacroAction action, CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(action.Payload))
@@ -284,8 +319,7 @@ public sealed class MacroRunner : IDisposable
             case MacroActionType.WorldVisit:
                 return await ExecuteWorldVisitWithFallbackAsync(payload, token);
             case MacroActionType.DataCenterVisit:
-                await ExecuteDataCenterVisitAsync(payload, token);
-                break;
+                return await ExecuteDataCenterVisitAsync(payload, token);
         }
 
         return ActionExecutionResult.Continue;
@@ -564,14 +598,23 @@ public sealed class MacroRunner : IDisposable
             return ActionExecutionResult.Continue;
 
         var candidates = GetWorldFallbackList(target);
-        foreach (var candidate in candidates)
+        for (var i = 0; i < candidates.Count; i++)
         {
+            var candidate = candidates[i];
             chatGui.Print($"[ShoutRunner] World visit attempt via Lifestream: {candidate}");
             var result = await ExecuteWorldTransferAsync(candidate, token);
             if (result == TransferExecutionResult.Success)
                 return ActionExecutionResult.Continue;
             if (result == TransferExecutionResult.SkipToNextWorldTransfer)
                 return ActionExecutionResult.SkipToNextWorldTransfer;
+            if (result == TransferExecutionResult.SkipToNextDataCenterTransfer)
+            {
+                var failedDc = GetDataCenterForWorld(candidate);
+                chatGui.PrintError($"[ShoutRunner] Cross-DC travel for {failedDc} stopped at character select. Skipping remaining worlds in that data center.");
+                while (i + 1 < candidates.Count && string.Equals(GetDataCenterForWorld(candidates[i + 1]), failedDc, StringComparison.OrdinalIgnoreCase))
+                    i++;
+                continue;
+            }
 
             lifestreamIpc.TryAbort();
             chatGui.PrintError($"[ShoutRunner] World visit failed: {candidate}. Trying next...");
@@ -581,21 +624,27 @@ public sealed class MacroRunner : IDisposable
         return ActionExecutionResult.Continue;
     }
 
-    private async Task ExecuteDataCenterVisitAsync(string dataCenter, CancellationToken token)
+    private async Task<ActionExecutionResult> ExecuteDataCenterVisitAsync(string dataCenter, CancellationToken token)
     {
         var target = dataCenter.Trim();
         if (string.IsNullOrEmpty(target))
-            return;
+            return ActionExecutionResult.Continue;
 
         var world = GetWorldForDataCenter(target);
         if (string.IsNullOrEmpty(world))
         {
             chatGui.PrintError($"[ShoutRunner] Unknown data center: {target}");
-            return;
+            return ActionExecutionResult.Continue;
         }
 
         chatGui.Print($"[ShoutRunner] Data center visit via Lifestream: {target} (using {world})");
-        await ExecuteWorldTransferAsync(world, token);
+        var result = await ExecuteWorldTransferAsync(world, token);
+        return result switch
+        {
+            TransferExecutionResult.SkipToNextWorldTransfer => ActionExecutionResult.SkipToNextWorldTransfer,
+            TransferExecutionResult.SkipToNextDataCenterTransfer => ActionExecutionResult.SkipToNextDataCenterTransfer,
+            _ => ActionExecutionResult.Continue
+        };
     }
 
     private void BeginTransferMonitoring(string targetWorld)
@@ -966,6 +1015,7 @@ public sealed class MacroRunner : IDisposable
         var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(5);
         var seenLogout = false;
         var lifestreamStartedBusy = false;
+        DateTime? loggedOutWhileIdleSince = null;
 
         chatGui.Print($"[ShoutRunner] Waiting for DC transfer to {target}...");
 
@@ -1034,9 +1084,26 @@ public sealed class MacroRunner : IDisposable
                     seenLogout = true;
                     chatGui.Print($"[ShoutRunner] Player logged out for DC transfer");
                 }
+
+                if (lifestreamIpc.TryIsBusy(out var busy) && !busy)
+                {
+                    loggedOutWhileIdleSince ??= DateTime.UtcNow;
+                    if (DateTime.UtcNow - loggedOutWhileIdleSince.Value >= TimeSpan.FromSeconds(5))
+                    {
+                        chatGui.PrintError($"[ShoutRunner] DC transfer to {target} stopped at the login screen. Skipping the remaining worlds in {GetDataCenterForWorld(target)}.");
+                        return TransferExecutionResult.SkipToNextDataCenterTransfer;
+                    }
+                }
+                else
+                {
+                    loggedOutWhileIdleSince = null;
+                }
+
                 await Task.Delay(1000, token);
                 continue;
             }
+
+            loggedOutWhileIdleSince = null;
 
             // If we're logged in (either still waiting for logout or returned after logout)
             if (state.IsLoggedIn && state.HasLocalPlayer)
