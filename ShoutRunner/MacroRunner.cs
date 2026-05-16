@@ -178,6 +178,7 @@ public sealed class MacroRunner : IDisposable
         Running = false;
         executing = false;
         NextRun = null;
+        EndTransferMonitoring();
         executionCts?.Cancel();
         executionCts?.Dispose();
         executionCts = null;
@@ -626,7 +627,10 @@ public sealed class MacroRunner : IDisposable
     private void OnChatMessageUnhandled(IChatMessage message)
     {
         var text = message.Message.TextValue;
-        if (string.IsNullOrWhiteSpace(text) || !IsCongestedTransferMessage(text))
+        if (string.IsNullOrWhiteSpace(text)
+            || text.StartsWith("[ShoutRunner]", StringComparison.OrdinalIgnoreCase)
+            || !Running
+            || !IsCongestedTransferMessage(text))
             return;
 
         lock (transferMonitorLock)
