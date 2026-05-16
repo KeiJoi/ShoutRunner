@@ -638,11 +638,15 @@ public sealed class MacroRunner : IDisposable
             if (string.IsNullOrWhiteSpace(monitoredTransferWorld))
                 return;
 
+            if (monitoredTransferShouldSkip)
+                return;
+
             monitoredTransferCongestionCount++;
             if (monitoredTransferCongestionCount >= 2)
             {
                 monitoredTransferShouldSkip = true;
-                chatGui.PrintError($"[ShoutRunner] Congested-world response detected twice for {monitoredTransferWorld}.");
+                chatGui.PrintError($"[ShoutRunner] Congested-world response detected twice for {monitoredTransferWorld}. Aborting current Lifestream task.");
+                lifestreamIpc.TryAbort();
             }
             else
             {
@@ -653,7 +657,8 @@ public sealed class MacroRunner : IDisposable
 
     private static bool IsCongestedTransferMessage(string text)
     {
-        return text.Contains("currently congested", StringComparison.OrdinalIgnoreCase)
+        return text.Contains("This World is experiencing congestion. Character movement is limited at this time", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("currently congested", StringComparison.OrdinalIgnoreCase)
             || text.Contains("destination world is currently congested", StringComparison.OrdinalIgnoreCase)
             || text.Contains("please wait until the world has become less congested", StringComparison.OrdinalIgnoreCase)
             || text.Contains("world is currently full", StringComparison.OrdinalIgnoreCase)
