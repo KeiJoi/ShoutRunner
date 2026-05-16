@@ -12,7 +12,10 @@ using Dalamud.Plugin.Services;
 using ECommons.Automation;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using FrameworkInstance = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework;
 using Lumina.Excel.Sheets;
 
 namespace ShoutRunner;
@@ -65,6 +68,18 @@ public sealed class MacroRunner : IDisposable
         Failed,
         SkipToNextWorldTransfer
     }
+
+    private static readonly string[] TransferAddonNames =
+    {
+        "SelectString",
+        "SelectYesno",
+        "ContextMenu",
+        "ContextIconMenu",
+        "WorldTravelFinderReady",
+        "Talk",
+        "Request",
+        "JournalResult"
+    };
 
     public bool TryGetProgress(out float value, out string label)
     {
@@ -616,6 +631,54 @@ public sealed class MacroRunner : IDisposable
         }
     }
 
+    private async Task CloseTransferWindowsAsync(CancellationToken token)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reg = token.Register(() => tcs.TrySetCanceled(token));
+
+        _ = framework.RunOnFrameworkThread(() =>
+        {
+            try
+            {
+                unsafe
+                {
+                    var frameworkInstance = FrameworkInstance.Instance();
+                    var uiModule = frameworkInstance->GetUIModule();
+                    if (uiModule == null)
+                    {
+                        tcs.TrySetResult();
+                        return;
+                    }
+
+                    var atkModule = uiModule->GetRaptureAtkModule();
+                    if (atkModule == null)
+                    {
+                        tcs.TrySetResult();
+                        return;
+                    }
+
+                    var unitManager = (RaptureAtkUnitManager*)&atkModule->AtkUnitManager;
+                    foreach (var addonName in TransferAddonNames)
+                    {
+                        var addon = unitManager->GetAddonByName(addonName, 1);
+                        if (addon == null)
+                            continue;
+
+                        addon->Close(false);
+                    }
+                }
+
+                tcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        await tcs.Task;
+    }
+
     private bool ShouldSkipCurrentTransfer()
     {
         lock (transferMonitorLock)
@@ -705,6 +768,7 @@ public sealed class MacroRunner : IDisposable
             if (result == TransferExecutionResult.SkipToNextWorldTransfer)
             {
                 lifestreamIpc.TryAbort();
+                await CloseTransferWindowsAsync(token);
                 chatGui.PrintError($"[ShoutRunner] {targetWorld} reported congestion twice. Waiting 5 seconds and skipping to the next world transfer.");
                 await Task.Delay(TimeSpan.FromSeconds(5), token);
                 return TransferExecutionResult.SkipToNextWorldTransfer;
@@ -713,6 +777,7 @@ public sealed class MacroRunner : IDisposable
             if (result == TransferExecutionResult.Failed)
             {
                 lifestreamIpc.TryAbort();
+                await CloseTransferWindowsAsync(token);
             }
 
             return result;
