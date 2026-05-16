@@ -160,7 +160,7 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "1.0.1.9",
+    "version": "1.0.1.10",
     "restore": {
       "projectUniqueName": "C:\\shoutrunner\\ShoutRunner\\ShoutRunner.csproj",
       "projectName": "ShoutRunner",

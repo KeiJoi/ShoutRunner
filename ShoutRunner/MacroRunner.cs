@@ -71,14 +71,9 @@ public sealed class MacroRunner : IDisposable
 
     private static readonly string[] TransferAddonNames =
     {
-        "SelectString",
-        "SelectYesno",
-        "ContextMenu",
-        "ContextIconMenu",
+        "WorldTravel",
         "WorldTravelFinderReady",
-        "Talk",
-        "Request",
-        "JournalResult"
+        "WorldTravelSelect"
     };
 
     public bool TryGetProgress(out float value, out string label)
