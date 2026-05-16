@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "ShoutRunner/1.0.1.10": {
+      "ShoutRunner/1.0.1.11": {
         "dependencies": {
           "ECommons": "3.1.0.16",
           "ImGui.NET": "1.90.7.1"
@@ -61,7 +61,7 @@
     }
   },
   "libraries": {
-    "ShoutRunner/1.0.1.10": {
+    "ShoutRunner/1.0.1.11": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
