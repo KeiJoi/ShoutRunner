@@ -653,13 +653,11 @@ public sealed class MacroRunner : IDisposable
 
     private static bool IsCongestedTransferMessage(string text)
     {
-        return text.Contains("congested", StringComparison.OrdinalIgnoreCase)
-            || text.Contains("world is full", StringComparison.OrdinalIgnoreCase)
+        return text.Contains("currently congested", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("destination world is currently congested", StringComparison.OrdinalIgnoreCase)
             || text.Contains("please wait until the world has become less congested", StringComparison.OrdinalIgnoreCase)
-            || (text.Contains("unable to visit", StringComparison.OrdinalIgnoreCase)
-                && text.Contains("try again", StringComparison.OrdinalIgnoreCase))
-            || (text.Contains("unable to travel", StringComparison.OrdinalIgnoreCase)
-                && text.Contains("try again", StringComparison.OrdinalIgnoreCase));
+            || text.Contains("world is currently full", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("please wait until an opening is available and try again", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<TransferExecutionResult> ExecuteWorldTransferAsync(string targetWorld, CancellationToken token)
@@ -764,8 +762,6 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
-            if (ShouldSkipCurrentTransfer())
-                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
@@ -797,6 +793,9 @@ public sealed class MacroRunner : IDisposable
                 }
             }
 
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
+
             await Task.Delay(500, token);
         }
 
@@ -809,12 +808,13 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             token.ThrowIfCancellationRequested();
-            if (ShouldSkipCurrentTransfer())
-                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
             if (!state.IsLoggedIn || !state.HasLocalPlayer)
             {
+                if (ShouldSkipCurrentTransfer())
+                    return TransferExecutionResult.SkipToNextWorldTransfer;
+
                 await Task.Delay(500, token);
                 continue;
             }
@@ -830,6 +830,9 @@ public sealed class MacroRunner : IDisposable
                     return TransferExecutionResult.Success;
                 }
             }
+
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var transitioning = state.BetweenAreas || state.BetweenAreas51;
             if (transitioning)
@@ -917,8 +920,6 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < startDeadline)
         {
             token.ThrowIfCancellationRequested();
-            if (ShouldSkipCurrentTransfer())
-                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
@@ -950,6 +951,9 @@ public sealed class MacroRunner : IDisposable
                 }
             }
 
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
+
             await Task.Delay(500, token);
         }
 
@@ -962,14 +966,15 @@ public sealed class MacroRunner : IDisposable
         while (DateTime.UtcNow < deadline)
         {
             token.ThrowIfCancellationRequested();
-            if (ShouldSkipCurrentTransfer())
-                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             var state = await GetGameStateAsync(token);
 
             // Track if we've seen a logout (player will be logged out during DC transfer)
             if (!state.IsLoggedIn)
             {
+                if (ShouldSkipCurrentTransfer())
+                    return TransferExecutionResult.SkipToNextWorldTransfer;
+
                 if (!seenLogout)
                 {
                     seenLogout = true;
@@ -1022,6 +1027,9 @@ public sealed class MacroRunner : IDisposable
                     }
                 }
             }
+
+            if (ShouldSkipCurrentTransfer())
+                return TransferExecutionResult.SkipToNextWorldTransfer;
 
             await Task.Delay(1000, token);
         }
